@@ -156,9 +156,9 @@ void StartTask_DAQ(void * argument) {
 			vTaskDelay(pdMS_TO_TICKS(5) - execution_time);
 		} else {
 			/* FAILSAFE: Loop took 5 ms or longer (likely due to timeouts).
-			   Force a hard 1 ms sleep to guarantee that lower priority tasks
+			   Force a hard 50 ms sleep to guarantee that lower priority tasks
 			   (like Telemetry) and the Watchdog get CPU time! */
-			vTaskDelay(pdMS_TO_TICKS(1));
+			vTaskDelay(pdMS_TO_TICKS(50));
 		}
     }
 }

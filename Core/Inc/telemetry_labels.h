@@ -43,11 +43,18 @@ typedef enum {
     LBL_I1,
     LBL_V2,
     LBL_I2,
-    /* Add additional labels here as needed */
     NUM_LABELS
 } LabelID_t;
 
-/* 3. Declare the string lookup table for external linkage */
+/* 3. Define Telemetry ErrorID Bitfields */
+/* These bits map directly to the ErrorID output in the telemetry JSON. */
+#define ERR_TEL_TASK_TO   (1UL << 0)  /* Telemetry task missed its 1 Hz deadline */
+#define ERR_INT_ADC_TO    (1UL << 1)  /* STM32 Internal ADC failed to respond */
+#define ERR_I2C_START_BIT 2           /* Bits 2-8 used dynamically for the 7 INA260 I2C sensors */
+#define ERR_SPI_START_BIT 9           /* Bits 9-11 used dynamically for the 3 SPI ADC chips */
+#define ERR_DAQ_TASK_TO   (1UL << 12) /* High-priority DAQ task failed to report alive */
+
+/* 4. Declare the string lookup table for external linkage */
 extern const char* const StringTable[NUM_VARIANTS][NUM_LABELS];
 
 #endif /* INC_TELEMETRY_LABELS_H_ */

@@ -104,34 +104,45 @@ void StartTask_DAQ(void * argument) {
             Set_SPI_CS(adc, 0);
 
             // Minimum CS high time between conversions is ~50ns. A few NOPs cover this safely.
-            for(volatile int nop = 0; nop < 5; nop++);
+			for(volatile int nop = 0; nop < 5; nop++) {
+				// Empty loop just for a tiny delay
+			}
 
             // Now read all 8 channels properly
-            for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
+			for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
 
-                // We send the command for the NEXT channel to prep the ADC.
-                // If we are on the last channel, we just send 0.
-                uint8_t nextCh = (ch == 7) ? 0 : (ch + 1);
-                txData = (nextCh << 11);
+				// We send the command for the NEXT channel to prep the ADC.
+				// If we are on the last channel, we just send 0.
+				uint8_t nextCh = (ch == 7) ? 0 : (ch + 1);
+				txData = (nextCh << 11);
 
-                Set_SPI_CS(adc, 1);
-                // Actual read - Timeout reduced to 1 ms
-                HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 1);
+				Set_SPI_CS(adc, 1);
+				// Actual read - Timeout reduced to 1 ms
+				HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 1);
 				Set_SPI_CS(adc, 0);
-                for(volatile int nop = 0; nop < 5; nop++);
+				for(volatile int nop = 0; nop < 5; nop++);
 
-                // Only record the sample if the SPI transaction was successful
-                if (spi_status == HAL_OK) {
-                    // Mask out the top 4 bits (ADC128S022 outputs 12-bit data)
-                    uint16_t rawAdcValue = rxData & 0x0FFF;
+				// Only record the sample if the SPI transaction was successful
+				if (spi_status == HAL_OK) {
 
-                    pingPongBuf[idx].spi_adc[adc][ch].sum += rawAdcValue;
-                    pingPongBuf[idx].spi_adc[adc][ch].count++;
-                    if(rawAdcValue < pingPongBuf[idx].spi_adc[adc][ch].min) pingPongBuf[idx].spi_adc[adc][ch].min = rawAdcValue;
-                    if(rawAdcValue > pingPongBuf[idx].spi_adc[adc][ch].max) pingPongBuf[idx].spi_adc[adc][ch].max = rawAdcValue;
-                }
-            }
-        }
+					/* --- DEAD BUS CHECK ---
+					 * With an internal pull-up on MISO, a missing chip returns 0xFFFF.
+					 * A real ADC128S022 always sends 4 leading zeros, so it will never equal 0xFFFF.
+					 */
+					if (rxData != 0xFFFF) {
+						// Mask out the top 4 bits (ADC128S022 outputs 12-bit data)
+						uint16_t rawAdcValue = rxData & 0x0FFF;
+
+						pingPongBuf[idx].spi_adc[adc][ch].sum += rawAdcValue;
+						pingPongBuf[idx].spi_adc[adc][ch].count++;
+						if(rawAdcValue < pingPongBuf[idx].spi_adc[adc][ch].min) pingPongBuf[idx].spi_adc[adc][ch].min = rawAdcValue;
+						if(rawAdcValue > pingPongBuf[idx].spi_adc[adc][ch].max) pingPongBuf[idx].spi_adc[adc][ch].max = rawAdcValue;
+					}
+					/* If rxData == 0xFFFF, we skip the count++.
+					   The Telemetry task will see count == 0 and organically throw the SPI error! */
+				}
+			}
+        } /* <--- ADDED MISSING CLOSING BRACE HERE */
 
         /* Calculate loop execution duration in microseconds */
 		uint32_t elapsed_cycles = DWT->CYCCNT - start_cycles;
@@ -156,7 +167,7 @@ void StartTask_DAQ(void * argument) {
 			vTaskDelay(pdMS_TO_TICKS(5) - execution_time);
 		} else {
 			/* FAILSAFE: Loop took 5 ms or longer (likely due to timeouts).
-			   Force a hard 50 ms sleep to guarantee that lower priority tasks
+			   Force a hard 5 ms sleep to guarantee that lower priority tasks
 			   (like Telemetry) and the Watchdog get CPU time! */
 			vTaskDelay(pdMS_TO_TICKS(50));
 		}

@@ -109,7 +109,7 @@ const char* const StringTable[NUM_VARIANTS][NUM_LABELS] = {
 	/* --- 3: UNKNOWN (Fault/Unknown state, both straps connected) ---------------- */
 	/* ========================================================================= */
 	[SIDE_UNKNOWN] = {
-		[LBL_SIDE]     = "BOTH",
+		[LBL_SIDE]     = "UNKNOWN",
 		[LBL_PCMU]     = "PCMU",
 		[LBL_MS]       = "MS",
 		[LBL_FW]       = "FW",

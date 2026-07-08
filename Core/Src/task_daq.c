@@ -38,13 +38,6 @@ static void Set_SPI_CS(uint8_t adc_idx, uint8_t enable) {
 
 
 void StartTask_DAQ(void * argument) {
-
-	//TEST TODO
-	while(1) {
-			daq_is_alive = 1;
-			vTaskDelay(pdMS_TO_TICKS(500));
-	    }
-
     // Initialize both buffers at startup
     ResetBuffer(0);
     ResetBuffer(1);
@@ -56,7 +49,7 @@ void StartTask_DAQ(void * argument) {
 
 	for(int i = 0; i < NUM_INA260; i++) {
 		/* INA260 addresses are 7-bit, HAL requires them shifted by 1 bit left */
-		HAL_I2C_Master_Transmit(&hi2c1, (INA_I2C_ADDRS[i] << 1), inaConfigPayload, 3, 100);
+		HAL_I2C_Master_Transmit(&hi2c1, (INA_I2C_ADDRS[i] << 1), inaConfigPayload, 3, 5);
 	}
 
 	/* Enable DWT Cycle Counter hardware register for microsecond task timing.

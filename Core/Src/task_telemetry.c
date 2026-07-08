@@ -340,9 +340,10 @@ void StartTask_Telemetry(void * argument) {
 		int len = 0;
 
 		/* Calculate High-Speed DAQ task execution metrics for the past second */
-		float daq_avg_ms = 0.0f, daq_min_ms = 0.0f, daq_max_ms = 0.0f;
+		float daq_samples = 0, daq_avg_ms = 0.0f, daq_min_ms = 0.0f, daq_max_ms = 0.0f;
 		if (pingPongBuf[processIdx].daq_loop_time.count > 0) {
-			float avg_raw_us = (float)pingPongBuf[processIdx].daq_loop_time.sum / pingPongBuf[processIdx].daq_loop_time.count;
+			daq_samples = pingPongBuf[processIdx].daq_loop_time.count;
+			float avg_raw_us = (float)pingPongBuf[processIdx].daq_loop_time.sum / daq_samples;
 			daq_avg_ms = avg_raw_us / 1000.0f;
 			daq_min_ms = (float)pingPongBuf[processIdx].daq_loop_time.min / 1000.0f;
 			daq_max_ms = (float)pingPongBuf[processIdx].daq_loop_time.max / 1000.0f;
@@ -515,44 +516,47 @@ void StartTask_Telemetry(void * argument) {
         getUnique96bitID(uid96);
 
         len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
-        		"},\"DEBUG\":{"
+				"},\"DEBUG\":{"
 				"\"UID96\":\"0x%08lX%08lX%08lX\","
 				"\"hw_addr3_v\":%.3f,\"hw_addr2_v\":%.3f,\"hw_addr1_v\":%.3f,\"hw_addr0_v\":%.3f,"
 				"\"tp2_v\":%.3f,\"tp5_v\":%.3f,\"prim_sel_v\":%.3f,\"sec_sel_v\":%.3f,\"tp9_v\":%.3f,\"tp10_v\":%.3f,"
 				"\"main1_v\":%.3f,\"main2_v\":%.3f,\"fp_s1_v\":%.3f,\"fp_s2_v\":%.3f,\"led_v\":%.3f,\"dir_v\":%.3f,\"omni_v\":%.3f,\"sec_v\":%.3f,"
 				"\"as_s1_v\":%.3f,\"as_s2_v\":%.3f,\"chr_s1_v\":%.3f,\"chr_s2_v\":%.3f,\"pcmu_s1_v\":%.3f,\"pcmu_s2_v\":%.3f,"
 				"\"Tel_Loop_Time_ms\":%lu,"
+				"\"Daq_Samples\":%lu,"
 				"\"Daq_Loop_Time_ms\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}"
+
 				"}}\r\n",
 
-            // --- Full 96-bit UID array words (Printed MSB to LSB order) ---
-            (unsigned long)uid96[2], (unsigned long)uid96[1], (unsigned long)uid96[0],
+			// --- Full 96-bit UID array words (Printed MSB to LSB order) ---
+			(unsigned long)uid96[2], (unsigned long)uid96[1], (unsigned long)uid96[0],
 
-            // --- Hardware Board Strapping Address ---
-            mux_voltages[2][3], mux_voltages[2][2], mux_voltages[2][1], mux_voltages[2][0],
+			// --- Hardware Board Strapping Address ---
+			mux_voltages[2][3], mux_voltages[2][2], mux_voltages[2][1], mux_voltages[2][0],
 
-            // --- Explicit Dedicated Test Points & Side Straps ---
-            mux_voltages[0][7], mux_voltages[1][7],
-            mux_voltages[2][4], // prim_sel_v (Formerly tp7_v)
-            mux_voltages[2][5], // sec_sel_v  (Formerly tp8_v)
-            mux_voltages[2][6], mux_voltages[2][7],
+			// --- Explicit Dedicated Test Points & Side Straps ---
+			mux_voltages[0][7], mux_voltages[1][7],
+			mux_voltages[2][4], // prim_sel_v (Formerly tp7_v)
+			mux_voltages[2][5], // sec_sel_v  (Formerly tp8_v)
+			mux_voltages[2][6], mux_voltages[2][7],
 
-            // --- Core Power Control Input Line Voltages ---
-            mux_voltages[0][0], mux_voltages[1][0], // main
-            mux_voltages[0][1], mux_voltages[1][1], // fp
-            mux_voltages[0][2],                     // led
-            mux_voltages[0][3],                     // dir
-            mux_voltages[1][3],                     // omni
-            mux_voltages[1][2],                     // sec
+			// --- Core Power Control Input Line Voltages ---
+			mux_voltages[0][0], mux_voltages[1][0], // main
+			mux_voltages[0][1], mux_voltages[1][1], // fp
+			mux_voltages[0][2],                     // led
+			mux_voltages[0][3],                     // dir
+			mux_voltages[1][3],                     // omni
+			mux_voltages[1][2],                     // sec
 
-            // --- Redundant Channel Hardware Valid Signal Voltages ---
-            mux_voltages[0][4], mux_voltages[1][4], // as
-            mux_voltages[0][5], mux_voltages[1][5], // chr
-            mux_voltages[0][6], mux_voltages[1][6],  // pcmu
+			// --- Redundant Channel Hardware Valid Signal Voltages ---
+			mux_voltages[0][4], mux_voltages[1][4], // as
+			mux_voltages[0][5], mux_voltages[1][5], // chr
+			mux_voltages[0][6], mux_voltages[1][6],  // pcmu
 
 			(unsigned long)execution_time_ms,	//Loop time of Telemetry task
+			(unsigned long)daq_samples,         //Number of DAQ samples this second
 			daq_min_ms, daq_max_ms, daq_avg_ms  //Loop time of DAQ task
-        );
+		);
 
         HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 500);
 

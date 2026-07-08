@@ -57,12 +57,11 @@ void StartTask_DAQ(void * argument) {
 	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
 	DWT->CTRL |= 1UL;
 
-	TickType_t xLastWakeTime = xTaskGetTickCount();
-	const TickType_t xFrequency = pdMS_TO_TICKS(5); /* Strict 5ms budget (200 Hz) */
-
-
     /* --- MAIN TASK LOOP --- */
     while(1) {
+    	// Capture the RTOS tick count at the very start of the cycle to calculate our dynamic sleep time later.
+    	TickType_t start_tick = xTaskGetTickCount();
+
     	// Start execution timing for this cycle
     	uint32_t start_cycles = DWT->CYCCNT;
 
@@ -73,7 +72,7 @@ void StartTask_DAQ(void * argument) {
 		for(int i = 0; i < NUM_INA260; i++) {
 			uint8_t i2cBuf[2];
 
-			// Read Voltage Register (0x02) - Timeout reduced to 1 ms
+			// Read Voltage Register (0x02) - Timeout set to 1 ms
 			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 1) == HAL_OK) {
 				int16_t rawVoltage = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].ina_voltage[i].sum += rawVoltage;
@@ -82,7 +81,7 @@ void StartTask_DAQ(void * argument) {
                 if(rawVoltage > pingPongBuf[idx].ina_voltage[i].max) pingPongBuf[idx].ina_voltage[i].max = rawVoltage;
 			}
 
-			// Read Current Register (0x01) - Timeout reduced to 1 ms
+			// Read Current Register (0x01) - Timeout set to 1 ms
 			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 1) == HAL_OK) {
 				int16_t rawCurrent = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].ina_current[i].sum += rawCurrent;
@@ -147,7 +146,19 @@ void StartTask_DAQ(void * argument) {
 		/* Feed software watchdog status flag */
         daq_is_alive = 1;
 
-        // Sleep until exactly 5ms have passed since the last wakeup
-        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        /* --- 3. DYNAMIC YIELD / BREATHING ROOM --- */
+		/* Calculate how many RTOS ticks the hardware sampling actually took */
+		TickType_t execution_time = xTaskGetTickCount() - start_tick;
+
+		if (execution_time < pdMS_TO_TICKS(5)) {
+			/* BEST CASE: Execution was fast! Hardware responded in time.
+			   Sleep the remaining time up to our 5 ms (200Hz) budget. */
+			vTaskDelay(pdMS_TO_TICKS(5) - execution_time);
+		} else {
+			/* FAILSAFE: Loop took 5 ms or longer (likely due to timeouts).
+			   Force a hard 1 ms sleep to guarantee that lower priority tasks
+			   (like Telemetry) and the Watchdog get CPU time! */
+			vTaskDelay(pdMS_TO_TICKS(1));
+		}
     }
 }

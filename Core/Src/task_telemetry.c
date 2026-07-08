@@ -496,9 +496,10 @@ void StartTask_Telemetry(void * argument) {
 		/* ========================================================================= */
 		char syslogHeader[180];
         int header_len = snprintf(syslogHeader, sizeof(syslogHeader),
-            "{\"PRI\":\"14\",\"VERSION\":\"1\",\"TIMESTAMP\":\"-\",\"HOSTNAME\":\"%s\",\"APP-NAME\":\"PCMU\",\"PROCID\":\"-\",\"MSGID\":\"HW_STATUS\",\"STRUCTURED-DATA\":\"-\",\"MSG\":{",
-            L(LBL_PCMU)); // Automatically inserts "PCMU", "PPCMU" or "SPCMU"
+				"{\"PRI\":\"14\",\"VERSION\":\"1\",\"TIMESTAMP\":\"-\",\"HOSTNAME\":\"%s\",\"APP-NAME\":\"PCMU\",\"PROCID\":\"-\",\"MSGID\":\"HW_STATUS\",\"STRUCTURED-DATA\":\"-\",\"MSG\":{",
+				L(LBL_PCMU)); // Automatically inserts "PCMU", "PPCMU" or "SPCMU"
 
+		/* RS422: Send Syslog header + Telemetry (without leading {) + Closing brackets */
         HAL_UART_Transmit(&huart1, (uint8_t*)syslogHeader, header_len, 100);
         HAL_UART_Transmit(&huart1, (uint8_t*)(txBuffer + 1), base_len - 1, 500);
         HAL_UART_Transmit(&huart1, (uint8_t*)"}}}\r\n", 4, 50);
@@ -516,7 +517,7 @@ void StartTask_Telemetry(void * argument) {
         getUnique96bitID(uid96);
 
         len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
-				"},\"DEBUG\":{"
+        		",\"DEBUG\":{"
 				"\"UID96\":\"0x%08lX%08lX%08lX\","
 				"\"hw_addr3_v\":%.3f,\"hw_addr2_v\":%.3f,\"hw_addr1_v\":%.3f,\"hw_addr0_v\":%.3f,"
 				"\"tp2_v\":%.3f,\"tp5_v\":%.3f,\"prim_sel_v\":%.3f,\"sec_sel_v\":%.3f,\"tp9_v\":%.3f,\"tp10_v\":%.3f,"
@@ -525,8 +526,7 @@ void StartTask_Telemetry(void * argument) {
 				"\"Tel_Loop_Time_ms\":%lu,"
 				"\"Daq_Samples\":%lu,"
 				"\"Daq_Loop_Time_ms\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}"
-
-				"}}\r\n",
+				"}}}\r\n",
 
 			// --- Full 96-bit UID array words (Printed MSB to LSB order) ---
 			(unsigned long)uid96[2], (unsigned long)uid96[1], (unsigned long)uid96[0],
@@ -558,7 +558,9 @@ void StartTask_Telemetry(void * argument) {
 			daq_min_ms, daq_max_ms, daq_avg_ms  //Loop time of DAQ task
 		);
 
-        HAL_UART_Transmit(&huart2, (uint8_t*)txBuffer, len, 500);
+        /* USB: Send manual JSON/MSG wrapper, then payload (without leading {) */
+		HAL_UART_Transmit(&huart2, (uint8_t*)"{\"MSG\":{", 8, 100);
+		HAL_UART_Transmit(&huart2, (uint8_t*)(txBuffer + 1), len - 1, 500);
 
 		/* --- 5. RESET THE PROCESSED BUFFER FOR THE NEXT ROUND --- */
 		/* Wipe sum, count and re-initialize min/max thresholds for the clean buffer */

@@ -38,6 +38,13 @@ static void Set_SPI_CS(uint8_t adc_idx, uint8_t enable) {
 
 
 void StartTask_DAQ(void * argument) {
+
+	//TEST TODO
+	while(1) {
+			daq_is_alive = 1;
+			vTaskDelay(pdMS_TO_TICKS(500));
+	    }
+
     // Initialize both buffers at startup
     ResetBuffer(0);
     ResetBuffer(1);
@@ -59,6 +66,7 @@ void StartTask_DAQ(void * argument) {
 
 	TickType_t xLastWakeTime = xTaskGetTickCount();
 	const TickType_t xFrequency = pdMS_TO_TICKS(5); /* Strict 5ms budget (200 Hz) */
+
 
     /* --- MAIN TASK LOOP --- */
     while(1) {

@@ -8,16 +8,20 @@ static void BlinkNumber(uint8_t count) {
     if (count == 0) {
         /* Short distinct blip for number zero */
         HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET); // ON
+        BSP_LED_On(LED_GREEN);
         osDelay(40);
         HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);   // OFF
+        BSP_LED_Off(LED_GREEN);
         osDelay(300);
         return;
     }
 
     for (uint8_t i = 0; i < count; i++) {
         HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET); // ON
+        BSP_LED_On(LED_GREEN);
         osDelay(200);
         HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);   // OFF
+        BSP_LED_Off(LED_GREEN);
         osDelay(250);
     }
     osDelay(500); /* Pause between parts of the same version */
@@ -27,6 +31,8 @@ static void BlinkNumber(uint8_t count) {
 void Version_BlinkSequence(void) {
     /* Wait 1.5 seconds at startup so task_rs422.c has time to read MUX3 first */
     osDelay(1500);
+    /* Initialize leds */
+    BSP_LED_Init(LED_GREEN);
 
     /* Decode the 4-bit Hardware Revision from MUX3 */
     uint8_t hw_version = (muxData.fields.hw_addr_3_msb << 3) |
@@ -49,6 +55,8 @@ void Version_BlinkSequence(void) {
 
     /* Make sure LED is turned off after the sequence is finished */
     HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+    BSP_LED_Off(LED_GREEN);
+    BSP_LED_DeInit(LED_GREEN);
 }
 
 uint32_t getUnique32bitID(void) {

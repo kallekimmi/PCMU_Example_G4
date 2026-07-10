@@ -26,6 +26,13 @@ extern UART_HandleTypeDef huart2; // USB Virtual COM Port for Verbose Debugging
 extern IWDG_HandleTypeDef hiwdg;  // Independent Hardware Watchdog
 extern ADC_HandleTypeDef hadc2;	  // STM32 internal ADC (used for MUX reading)
 
+/* Linker symbols used to calculate static Flash memory usage.
+ * These are defined by the GCC linker script (.ld file) and point
+ * to specific memory boundaries created during compilation. */
+extern uint32_t _sidata; // Start address of initialized data section (.data) in Flash
+extern uint32_t _sdata;  // Start address of initialized data section in RAM
+extern uint32_t _edata;  // End address of initialized data section in RAM
+
 /**
   * @brief  Task responsible for buffer swapping, processing accumulated raw
   * samples into engineering units, and transmitting a JSON telemetry log.
@@ -114,7 +121,30 @@ void StartTask_Telemetry(void * argument) {
 	const uint8_t side_val = (sec << 1) | prim;
 
 	// Cast the side value directly to our enumerated type for string table lookups
-	Side_t active_variant = (Side_t)side_val;
+	const Side_t active_variant = (Side_t)side_val;
+
+	// Factory Registers: Read static hardware specs from ST's read-only memory
+	const uint16_t flash_size_kb = *(uint16_t*)(0x1FFF75E0); // Factory programmed Flash capacity
+
+	/* DBGMCU_ADDR = 0x40015800 for STM32 F0, L0, G0
+	 * DBGMCU_ADDR = 0xE0042000 for STM32 F3, L4, G4
+	 *
+	 * 	Nucleo-32 Board		Target MCU		ARM Core		DBGMCU_IDCODE Address	DEV_ID (Bits 11:0)
+	 * 	NUCLEO-F031K6		STM32F031K6		Cortex-M0		0x40015800				0x442
+	 *	NUCLEO-F042K6		STM32F042K6		Cortex-M0		0x40015800				0x445
+	 * 	NUCLEO-F303K8		STM32F303K8		Cortex-M4		0xE0042000				0x438
+	 * 	NUCLEO-L031K6		STM32L031K6		Cortex-M0+		0x40015800				0x425
+	 * 	NUCLEO-L412KB		STM32L412KB		Cortex-M4		0xE0042000				0x470
+	 * 	NUCLEO-L432KC		STM32L432KC		Cortex-M4		0xE0042000				0x435
+	 * 	NUCLEO-G031K8		STM32G031K8		Cortex-M0+		0x40015800				0x466
+	 * 	NUCLEO-G431KB		STM32G431KB		Cortex-M4		0xE0042000				0x468
+	 */
+	const uint16_t device_id = (*(uint32_t*)(0xE0042000)) & 0xFFF; // Silicon Device ID (e.g., 0x435 for L432)
+
+    // Read the full uncompressed 96-bit hardware UID array
+	uint32_t uid96[3];
+    getUnique96bitID(uid96);
+
 
 	/* ========================================================================= */
 	/* --- MACROS FOR STRING LOOKUP -------------------------------------------- */
@@ -582,13 +612,13 @@ void StartTask_Telemetry(void * argument) {
         /* Calculate how many milliseconds this loop has executed so far */
         uint32_t execution_time_ms = (xTaskGetTickCount() - loop_start_tick) * portTICK_PERIOD_MS;
 
-        /* Read the full uncompressed 96-bit hardware UID array */
-        uint32_t uid96[3];
-        getUnique96bitID(uid96);
+        // RAM Usage: Query FreeRTOS dynamically for the remaining Heap memory
+        uint32_t free_ram_bytes = (uint32_t)xPortGetFreeHeapSize();
 
         len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
         		",\"DEBUG\":{"
-        		"\"Tx_Msg_Len\":%lu,\"Tx_Buffer_Margin\":%ld,"
+        		"\"Tx_Msg_Len_B\":%lu,\"Tx_Buffer_Margin_B\":%ld,"
+        		"\"Flash_KB\":%u,\"DevID\":\"0x%03X\",\"Free_RAM_B\":%lu,"
 				"\"UID96\":\"0x%08lX%08lX%08lX\","
 				"\"hw_addr3_v\":%.3f,\"hw_addr2_v\":%.3f,\"hw_addr1_v\":%.3f,\"hw_addr0_v\":%.3f,"
 				"\"tp2_v\":%.3f,\"tp5_v\":%.3f,\"prim_sel_v\":%.3f,\"sec_sel_v\":%.3f,\"tp9_v\":%.3f,\"tp10_v\":%.3f,"
@@ -603,6 +633,11 @@ void StartTask_Telemetry(void * argument) {
 			(unsigned long)len,
 			// --- Buffer Margin ---
 			(long)(sizeof(txBuffer) - len),
+
+			// --- Hardware System Info (Flash, Dev_ID, RAM, Free Flash) ---
+			flash_size_kb,
+			device_id,
+			(unsigned long)free_ram_bytes,
 
 			// --- Full 96-bit UID array words (Printed MSB to LSB order) ---
 			(unsigned long)uid96[2], (unsigned long)uid96[1], (unsigned long)uid96[0],

@@ -10,7 +10,7 @@
   ******************************************************************************
   */
 
-#include <daq.h>
+#include "daq.h"
 #include "buffer.h"
 #include "version.h"
 #include "main.h"       // Required for STM32 HAL definitions (MUX_SEL_A_Pin, etc.)
@@ -18,7 +18,8 @@
 #include "task.h"       // Required for FreeRTOS task control (vTaskDelayUntil)
 #include <stdio.h>
 #include <string.h>     // Required for strlen(), strcpy(), strcat()
-#include <telemetry_labels.h> // String lookup table, Side_t, LabelID_t, Error definitions
+#include "telemetry_labels.h" // String lookup table, Side_t, LabelID_t, Error definitions
+#include "runtime_logger.h"
 
 /* External handles initialized by STM32CubeMX in main.c */
 extern UART_HandleTypeDef huart1; // RS422 interface for Main Telemetry
@@ -42,6 +43,10 @@ extern uint32_t _edata;  // End address of initialized data section in RAM
 void StartTask_Telemetry(void * argument) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
     const TickType_t xFrequency = pdMS_TO_TICKS(1000); // Exactly 1 Hz execution rate
+
+    // Tracks the exact RTOS tick count to accurately measure elapsed seconds for runtime_logger
+    uint32_t last_save_tick = xTaskGetTickCount();
+
     // Retrieve the unique 32-bit hardware serial number of the STM32 chip
     const uint32_t uid32 = getUnique32bitID();
 
@@ -454,13 +459,44 @@ void StartTask_Telemetry(void * argument) {
 			daq_max_ms = (float)pingPongBuf[processIdx].daq_loop_time.max / 1000.0f;
 		}
 
+		/* ========================================================================= */
+		/* --- RUNTIME HYBRID LOGGER (FLASH + RAM) --------------------------------- */
+		/* ========================================================================= */
+		/* We calculate exact seconds using the FreeRTOS tick counter.
+		 * To achieve a 48+ year lifespan for the STM32 Flash memory, we only write
+		 * the elapsed time to the non-volatile memory once every 60 seconds (1 minute).
+		 *
+		 * Wear Leveling Math:
+		 * By using 10 dedicated Flash pages (20 KB) as a circular buffer, we get
+		 * 2560 storage slots (64-bit per slot).
+		 * 2560 slots * 10,000 erase cycles = 25,600,000 minutes.
+		 * 25,600,000 minutes = 426,666 hours = >48 years of continuous 24/7 operation.
+		 */
+
+		uint32_t current_tick = xTaskGetTickCount();
+		uint32_t ms_since_last_save = (current_tick - last_save_tick) * portTICK_PERIOD_MS;
+		uint32_t ram_seconds = ms_since_last_save / 1000;
+
+		/* If 60 seconds have elapsed, commit 1 minute to Flash and reset the RAM counter */
+		if (ram_seconds >= 60) {
+			Logger_SaveMinute();
+			last_save_tick = current_tick; // Reset baseline
+			ram_seconds = 0;               // Reset local seconds
+		}
+
+		/* Calculate lifetime in hours based ONLY on safely stored Flash data. */
+		/* This guarantees the displayed value will never jump backwards after a reset. */
+		float lifetime_hours = (Logger_GetTotalMinutes() / 60.0f);
+
+
 		/* 5a. Format JSON: Start directly with the core telemetry payload (MS & FW) */
 		/* Note: We inject both ErrorID and SideID alongside their string equivalents */
 		len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
-			"{\"Uptime\":%lu,\"Rst\":\"%s\",\"ErrorID\":%lu,\"Error\":\"%s\",\"HW_ver\":\"0x%02X\",\"SW_ver\":\"%d.%d.%d\",\"UID\":\"0x%08lX\",\"SideID\":%d,\"Side\":\"%s\","
+			"{\"Uptime\":%lu,\"Lifetime\":%.3f,\"Rst\":\"%s\",\"ErrorID\":%lu,\"Error\":\"%s\",\"HW_ver\":\"0x%02X\",\"SW_ver\":\"%d.%d.%d\",\"UID\":\"0x%08lX\",\"SideID\":%d,\"Side\":\"%s\","
 			"\"%s\":{\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
 			"\"%s\":{\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},",
 			uptime_s,
+			lifetime_hours,
 			rst_str,
 			(unsigned long)current_error_id,
 			err_str,

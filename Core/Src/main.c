@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "buffer.h"
 #include "version.h"
+#include "runtime_logger.h"
 
 // Tell main.c that these functions exist in your other .c files
 extern void StartTask_DAQ(void * argument);
@@ -127,6 +128,7 @@ int main(void)
   MX_ADC2_Init();
   MX_IWDG_Init();
   MX_USART2_UART_Init();
+  Logger_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */

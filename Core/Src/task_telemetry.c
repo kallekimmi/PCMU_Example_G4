@@ -47,6 +47,12 @@ void StartTask_Telemetry(void * argument) {
     // Tracks the exact RTOS tick count to accurately measure elapsed seconds for runtime_logger
     uint32_t last_save_tick = xTaskGetTickCount();
 
+    /* Dedicated uptime counter in seconds.
+	 * By incrementing a standard 32-bit integer at exactly 1 Hz, we bypass the
+	 * 49.7-day overflow limitation of the FreeRTOS xTaskGetTickCount() function.
+	 * This counter will safely track continuous uptime for over 136 years. */
+    uint32_t uptime_s = 0;
+
     // Retrieve the unique 32-bit hardware serial number of the STM32 chip
     const uint32_t uid32 = getUnique32bitID();
 
@@ -184,10 +190,6 @@ void StartTask_Telemetry(void * argument) {
     	/* Reset the Error ID bitfield at the start of each evaluation second */
 		uint32_t current_error_id = 0; // Reset error bitfield
 
-		 // Check structural hardware strapping faults
-		if (side_val == SIDE_NONE) current_error_id |= ERR_PCP_NC;
-		else if (side_val == SIDE_UNKNOWN) current_error_id |= ERR_SIDE_INV;
-
 		/* Check if the processing and UART transmission of the PREVIOUS loop
 		   took longer than the 1 Hz budget (1000ms). If it did, log a Loop Timeout. */
 		if ((xTaskGetTickCount() - xLastWakeTime) > xFrequency) {
@@ -197,10 +199,20 @@ void StartTask_Telemetry(void * argument) {
 		/* Wait until exactly 1000ms have passed since the last execution */
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-		 // Check if the High-Speed DAQ task failed to report in
+		/* Increment the continuous 1 Hz system uptime counter.
+		 * Placed immediately after vTaskDelayUntil() to guarantee that all task
+		 * processing, error evaluation, and JSON telemetry use the newly
+		 * elapsed second timestamp. */
+		uptime_s++;
+
+		// Check if the High-Speed DAQ task failed to report in
 		if (daq_is_alive == 0) {
 			current_error_id |= ERR_DAQ_TASK_TO;
 		}
+
+		// Check structural hardware strapping faults
+		if (side_val == SIDE_NONE) current_error_id |= ERR_PCP_NC;
+		else if (side_val == SIDE_UNKNOWN) current_error_id |= ERR_SIDE_INV;
 
         /* --- 1. SWAP BUFFER (Ping-Pong Architecture) --- */
         // Grab the buffer index that the DAQ task just finished filling
@@ -446,7 +458,6 @@ void StartTask_Telemetry(void * argument) {
         /* By breaking the formatting into smaller segments, we prevent the MCU's
 		   system heap/stack from overflowing when formatting multiple floats simultaneously. */
 		static char txBuffer[4096];
-		uint32_t uptime_s = xTaskGetTickCount() / 1000;
 		size_t len = 0; // Tracks the current index in the txBuffer
 
 		// Calculate execution statistics for the High-Speed DAQ task
@@ -486,7 +497,7 @@ void StartTask_Telemetry(void * argument) {
 
 		/* Calculate lifetime in hours based ONLY on safely stored Flash data. */
 		/* This guarantees the displayed value will never jump backwards after a reset. */
-		float lifetime_hours = (Logger_GetTotalMinutes() / 60.0f);
+		double lifetime_hours = (Logger_GetTotalMinutes() / 60.0);
 
 
 		/* 5a. Format JSON: Start directly with the core telemetry payload (MS & FW) */

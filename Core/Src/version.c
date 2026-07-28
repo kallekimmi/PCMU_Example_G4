@@ -29,24 +29,11 @@ static void BlinkNumber(uint8_t count) {
 
 /* Main sequence function called from the FreeRTOS default task */
 void Version_BlinkSequence(void) {
-    /* Wait 1.5 seconds at startup so task_rs422.c has time to read MUX3 first */
     osDelay(1500);
     /* Initialize leds */
     BSP_LED_Init(LED_GREEN);
 
-    /* Decode the 4-bit Hardware Revision from MUX3 */
-    uint8_t hw_version = (muxData.fields.hw_addr_3_msb << 3) |
-                         (muxData.fields.hw_addr_2     << 2) |
-                         (muxData.fields.hw_addr_1     << 1) |
-                         (muxData.fields.hw_addr_0_lsb);
-
     /* --- VISUAL BLINK SEQUENCE RUNS ONCE AT STARTUP --- */
-
-    /* PHASE 1: Blink Hardware Version */
-    BlinkNumber(hw_version);
-
-    /* Clean 1.5-second delay to separate HW and SW */
-    osDelay(1500);
 
     /* PHASE 2: Blink Software Version (Major.Minor.Patch) */
     BlinkNumber(SW_VERSION_MAJOR);

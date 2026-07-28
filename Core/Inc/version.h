@@ -6,7 +6,7 @@
 /* --- Software Version (Semantic Versioning: MAJOR.MINOR.PATCH) --- */
 #define SW_VERSION_MAJOR      0
 #define SW_VERSION_MINOR      0
-#define SW_VERSION_PATCH      1
+#define SW_VERSION_PATCH      2
 
 /* --- Function Prototypes --- */
 void Version_BlinkSequence(void);

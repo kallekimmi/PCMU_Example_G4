@@ -72,8 +72,8 @@ void StartTask_DAQ(void * argument) {
 		for(int i = 0; i < NUM_INA260; i++) {
 			uint8_t i2cBuf[2];
 
-			// Read Voltage Register (0x02) - Timeout set to 1 ms
-			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 1) == HAL_OK) {
+			// Read Voltage Register (0x02) - Timeout set to 2 ms
+			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawVoltage = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].ina_voltage[i].sum += rawVoltage;
                 pingPongBuf[idx].ina_voltage[i].count++;
@@ -81,8 +81,8 @@ void StartTask_DAQ(void * argument) {
                 if(rawVoltage > pingPongBuf[idx].ina_voltage[i].max) pingPongBuf[idx].ina_voltage[i].max = rawVoltage;
 			}
 
-			// Read Current Register (0x01) - Timeout set to 1 ms
-			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 1) == HAL_OK) {
+			// Read Current Register (0x01) - Timeout set to 2 ms
+			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawCurrent = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].ina_current[i].sum += rawCurrent;
                 pingPongBuf[idx].ina_current[i].count++;
@@ -99,8 +99,8 @@ void StartTask_DAQ(void * argument) {
             uint16_t rxData = 0;
 
             Set_SPI_CS(adc, 1);
-            // Dummy read - Timeout reduced to 1 ms
-            HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 1);
+            // Dummy read - Timeout reduced to 2 ms
+            HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 2);
             Set_SPI_CS(adc, 0);
 
             // Minimum CS high time between conversions is ~50ns. A few NOPs cover this safely.
@@ -117,8 +117,8 @@ void StartTask_DAQ(void * argument) {
 				txData = (nextCh << 11);
 
 				Set_SPI_CS(adc, 1);
-				// Actual read - Timeout reduced to 1 ms
-				HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 1);
+				// Actual read - Timeout reduced to 2 ms
+				HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 2);
 				Set_SPI_CS(adc, 0);
 				for(volatile int nop = 0; nop < 5; nop++);
 

@@ -61,12 +61,12 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED1_Pin GPIO_PIN_0
 #define LED1_GPIO_Port GPIOA
-#define MUX_COM0_Pin GPIO_PIN_1
-#define MUX_COM0_GPIO_Port GPIOA
+#define MUX_COM2_Pin GPIO_PIN_1
+#define MUX_COM2_GPIO_Port GPIOA
 #define MUX_COM1_Pin GPIO_PIN_4
 #define MUX_COM1_GPIO_Port GPIOA
-#define MUX_COM2_Pin GPIO_PIN_7
-#define MUX_COM2_GPIO_Port GPIOA
+#define MUX_COM0_Pin GPIO_PIN_7
+#define MUX_COM0_GPIO_Port GPIOA
 #define MUX_SEL_B_Pin GPIO_PIN_0
 #define MUX_SEL_B_GPIO_Port GPIOB
 #define SPI_CS_A0_Pin GPIO_PIN_8

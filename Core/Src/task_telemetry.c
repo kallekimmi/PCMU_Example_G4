@@ -238,16 +238,24 @@ void StartTask_Telemetry(void * argument) {
 
 			/* Read all 3 channels in sequence using the built-in sequencer */
 			for(int m = 0; m < NUM_MUX; m++) {
-				/* Ensure the conversion was successful before fetching the value */
-				if (HAL_ADC_PollForConversion(&hadc2, 1) == HAL_OK) {
-					/* Fetch the raw 12-bit values and convert them to Volts (3.3V VREF) */
-					uint32_t raw_value = HAL_ADC_GetValue(&hadc2);
-					mux_voltages[m][ch] = ((float)raw_value * 3.3f) / 4095.0f;
-				} else {
-					/* If the ADC hangs, flag it with a distinct error value */
-					mux_voltages[m][ch] = -999.0f;
-					current_error_id |= ERR_INT_ADC_TO; /* Set Internal ADC timeout bit */
-				}
+			    /* Ensure the conversion was successful before fetching the value */
+			    if (HAL_ADC_PollForConversion(&hadc2, 1) == HAL_OK) {
+			        /* Fetch the raw 12-bit values and convert them to Volts (3.3V VREF) */
+			        uint32_t raw_value = HAL_ADC_GetValue(&hadc2);
+			        mux_voltages[m][ch] = ((float)raw_value * 3.3f) / 4095.0f;
+
+			        /* Update the digital logic states only for MUX1 (m=0) and MUX2 (m=1).
+			           MUX3 (m=2) contains the HW-address and Side Select, which must
+			           remain permanently locked to their initial boot values.*/
+			        if (m < 2) {
+			            muxData.raw[m][ch] = (mux_voltages[m][ch] > 1.5f) ? 1 : 0;
+			        }
+
+			    } else {
+			        /* If the ADC hangs, flag it with a distinct error value */
+			        mux_voltages[m][ch] = -999.0f;
+			        current_error_id |= ERR_INT_ADC_TO; /* Set Internal ADC timeout bit */
+			    }
 			}
 		}
 

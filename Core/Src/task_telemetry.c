@@ -445,7 +445,6 @@ void StartTask_Telemetry(void * argument) {
 				}
 			}
 
-
 			// Remove the trailing space applied during concatation for a clean output
 			size_t err_len = strlen(err_str);
 			if (err_len > 0) {
@@ -453,8 +452,7 @@ void StartTask_Telemetry(void * argument) {
 			}
 		}
 
-
-		/* --- 5. FORMAT AND SEND UART (JSON LOG) --- */
+		/* --- 5. FORMAT AND COMPILE JSON LOG --- */
         /* By breaking the formatting into smaller segments, we prevent the MCU's
 		   system heap/stack from overflowing when formatting multiple floats simultaneously. */
 		static char txBuffer[4096];
@@ -473,17 +471,6 @@ void StartTask_Telemetry(void * argument) {
 		/* ========================================================================= */
 		/* --- RUNTIME HYBRID LOGGER (FLASH + RAM) --------------------------------- */
 		/* ========================================================================= */
-		/* We calculate exact seconds using the FreeRTOS tick counter.
-		 * To achieve a 48+ year lifespan for the STM32 Flash memory, we only write
-		 * the elapsed time to the non-volatile memory once every 60 seconds (1 minute).
-		 *
-		 * Wear Leveling Math:
-		 * By using 10 dedicated Flash pages (20 KB) as a circular buffer, we get
-		 * 2560 storage slots (64-bit per slot).
-		 * 2560 slots * 10,000 erase cycles = 25,600,000 minutes.
-		 * 25,600,000 minutes = 426,666 hours = >48 years of continuous 24/7 operation.
-		 */
-
 		uint32_t current_tick = xTaskGetTickCount();
 		uint32_t ms_since_last_save = (current_tick - last_save_tick) * portTICK_PERIOD_MS;
 		uint32_t ram_seconds = ms_since_last_save / 1000;
@@ -496,12 +483,10 @@ void StartTask_Telemetry(void * argument) {
 		}
 
 		/* Calculate lifetime in hours based ONLY on safely stored Flash data. */
-		/* This guarantees the displayed value will never jump backwards after a reset. */
 		double lifetime_hours = (Logger_GetTotalMinutes() / 60.0);
 
-
 		/* 5a. Format JSON: Start directly with the core telemetry payload (MS & FW) */
-		/* Note: We inject both ErrorID and SideID alongside their string equivalents */
+		/* Note: The root JSON structure is intentionally kept open here to allow appending. */
 		len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
 			"{\"Uptime\":%lu,\"Lifetime\":%.3f,\"Rst\":\"%s\",\"ErrorID\":%lu,\"Error\":\"%s\",\"HW_ver\":\"0x%02X\",\"SW_ver\":\"%d.%d.%d\",\"UID\":\"0x%08lX\",\"SideID\":%d,\"Side\":\"%s\","
 			"\"%s\":{\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
@@ -532,7 +517,6 @@ void StartTask_Telemetry(void * argument) {
 		);
 
 		/* 5b. Format JSON: FP, MD, AUX1, CHR */
-		/* Note: CHR uses GET_SRC_ID for numerical ID and GET_SRC_STR for the string representation */
 		len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
 			"\"%s\":{\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"%s\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
 			"\"%s\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"I\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
@@ -561,7 +545,7 @@ void StartTask_Telemetry(void * argument) {
 			ina_v_min[6], ina_v_max[6], ina_v_avg[6],    // V
 			ina_i_min[6], ina_i_max[6], ina_i_avg[6],    // I
 			chr_src_id, // Chronometer source as integer 0 = None,1, 2, 3=UNKNOWN
-			GET_SRC_STR(muxData.fields.chr1_valid_n, muxData.fields.chr2_valid_n) // Evaluates to string "UPS1", "UPS2", etc.
+			GET_SRC_STR(muxData.fields.chr1_valid_n, muxData.fields.chr2_valid_n)
 		);
 
 		/* 5c. Format JSON: AS, MC, FAN, PSEC, LPRC */
@@ -636,32 +620,17 @@ void StartTask_Telemetry(void * argument) {
 			muxData.fields.di_sec_state
 		);
 
-		int base_len = len;
-
-		/* ========================================================================= */
-		/* --- RS422 TRANSMISSION (WITH SYSLOG RFC 5424 HEADER) -------------------- */
-		/* ========================================================================= */
-		char syslogHeader[180];
-        int header_len = snprintf(syslogHeader, sizeof(syslogHeader),
-				"{\"PRI\":\"14\",\"VERSION\":\"1\",\"TIMESTAMP\":\"-\",\"HOSTNAME\":\"%s\",\"APP-NAME\":\"PCMU\",\"PROCID\":\"-\",\"MSGID\":\"HW_STATUS\",\"STRUCTURED-DATA\":\"-\",\"MSG\":{",
-				L(LBL_PCMU)); // Automatically inserts "PCMU", "PPCMU" or "SPCMU"
-
-		/* RS422: Send Syslog header + Telemetry (without leading {) + Closing brackets */
-        HAL_UART_Transmit(&huart1, (uint8_t*)syslogHeader, header_len, 100);
-        HAL_UART_Transmit(&huart1, (uint8_t*)(txBuffer + 1), base_len - 1, 500);
-        HAL_UART_Transmit(&huart1, (uint8_t*)"}}}\r\n", 4, 50);
-
         /* ========================================================================= */
-        /* --- USB VERBOSE OUTPUT: APPEND FLATTENED DEBUG DATA (PURE JSON) --------- */
+        /* --- APPEND FLATTENED DEBUG DATA (PURE JSON) ----------------------------- */
         /* ========================================================================= */
-        len = base_len;
-
         /* Calculate how many milliseconds this loop has executed so far */
         uint32_t execution_time_ms = (xTaskGetTickCount() - loop_start_tick) * portTICK_PERIOD_MS;
 
         // RAM Usage: Query FreeRTOS dynamically for the remaining Heap memory
         uint32_t free_ram_bytes = (uint32_t)xPortGetFreeHeapSize();
 
+		/* Append the DEBUG object to the end of txBuffer.
+		   We only close the "DEBUG" object itself here. The root object wrapper will be handled by the DMA buffer. */
         len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
         		",\"DEBUG\":{"
         		"\"Tx_Msg_Len_B\":%lu,\"Tx_Buffer_Margin_B\":%ld,"
@@ -674,7 +643,7 @@ void StartTask_Telemetry(void * argument) {
 				"\"Tel_Loop_Time_ms\":%lu,"
 				"\"Daq_Samples\":%lu,"
 				"\"Daq_Loop_Time_ms\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}"
-				"}}}\r\n",
+				"}",
 
 			// --- Message Length ---
 			(unsigned long)len,
@@ -709,28 +678,45 @@ void StartTask_Telemetry(void * argument) {
 			// --- Redundant Channel Hardware Valid Signal Voltages ---
 			mux_voltages[0][4], mux_voltages[1][4], // as
 			mux_voltages[0][5], mux_voltages[1][5], // chr
-			mux_voltages[0][6], mux_voltages[1][6],  // pcmu
+			mux_voltages[0][6], mux_voltages[1][6], // pcmu
 
-			(unsigned long)execution_time_ms,	//Loop time of Telemetry task
-			(unsigned long)daq_samples,         //Number of DAQ samples this second
-			daq_min_ms, daq_max_ms, daq_avg_ms  //Loop time of DAQ task
+			(unsigned long)execution_time_ms,	// Loop time of Telemetry task
+			(unsigned long)daq_samples,         // Number of DAQ samples this second
+			daq_min_ms, daq_max_ms, daq_avg_ms  // Loop time of DAQ task
 		);
 
-        /* USB: Send manual JSON/MSG wrapper, then payload (without leading {) */
-		HAL_UART_Transmit(&huart2, (uint8_t*)"{\"MSG\":{", 8, 100);
-		HAL_UART_Transmit(&huart2, (uint8_t*)(txBuffer + 1), len - 1, 500);
+        /* ========================================================================= */
+        /* --- DMA TRANSMISSION (RS422 & USB) -------------------------------------- */
+        /* ========================================================================= */
+
+        /* Static buffer is strictly required to guarantee that the allocated memory
+           does not drop out of scope or get overwritten while the DMA hardware controller
+           performs asynchronous background reads during the subsequent task cycle. */
+        static char dmaTxBuffer[4096];
+
+        /* Construct the complete, unified Syslog payload enveloping all core and debug data.
+           We skip the very first bracket in txBuffer (txBuffer + 1) to seamlessly nest the objects.
+           We finalize the string with two braces '}}' closing both "MSG":{ and the root object. */
+        int dma_len = snprintf(dmaTxBuffer, sizeof(dmaTxBuffer),
+            "{\"PRI\":\"14\",\"VERSION\":\"1\",\"TIMESTAMP\":\"-\",\"HOSTNAME\":\"%s\",\"APP-NAME\":\"PCMU\",\"PROCID\":\"-\",\"MSGID\":\"HW_STATUS\",\"STRUCTURED-DATA\":\"-\",\"MSG\":{%s}}\r\n",
+            L(LBL_PCMU), (txBuffer + 1));
+
+        /* Hand over the finalized string directly to the DMA peripheral for background transmission
+           on both the primary RS422 interface and the USB Virtual COM Port. */
+        HAL_UART_Transmit_DMA(&huart1, (uint8_t*)dmaTxBuffer, dma_len);
+        HAL_UART_Transmit_DMA(&huart2, (uint8_t*)dmaTxBuffer, dma_len);
 
 		/* --- 6. RESET THE PROCESSED BUFFER FOR THE NEXT ROUND --- */
 		/* Wipe sum, count and re-initialize min/max thresholds for the clean buffer */
 		ResetBuffer(processIdx);
 
-		/* --- 6. FEED THE WATCHDOG --- */
+		/* --- 7. FEED THE WATCHDOG --- */
 		/* Reload the 3-second IWDG timer. Since this RS422 task runs exactly once
 		   per second (1 Hz), we have a safe 2-second margin. If the system hangs,
 		   this function is never called, and the STM32 performs a hardware reset. */
 		/* Verify that the high-priority DAQ task is still alive
 		   before allowing the system to continue ticking. */
-		//If DAQ task freezes, DAQ_TASK_TO Error flag will be sent 3 times before the 3s watchdog reset the MCU.
+		// If DAQ task freezes, DAQ_TASK_TO Error flag will be sent 3 times before the 3s watchdog resets the MCU.
 		if (daq_is_alive == 1) {
 			HAL_IWDG_Refresh(&hiwdg);
 			daq_is_alive = 0; // Reset the flag so the DAQ task must set it again

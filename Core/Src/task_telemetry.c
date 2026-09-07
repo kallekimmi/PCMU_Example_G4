@@ -172,13 +172,12 @@ void StartTask_Telemetry(void * argument) {
 	   - Returns 3 (11 in binary) if both sources are active (Fault state). */
 	#define GET_SRC_ID(valid1_n, valid2_n) ( ((!(valid2_n)) << 1) | (!(valid1_n)) )
 
-	/* Macro to dynamically resolve power source strings instead of integers.
-	   - Returns "NONE" if neither source is active (1, 1).
-	   - Returns "UNKNOWN" if both sources are active simultaneously (0, 0).
-	   - Otherwise returns the mapped name of the single active source. */
-	#define GET_SRC_STR(valid1_n, valid2_n) \
-		(((valid1_n) == (valid2_n)) ? ((valid1_n) ? "NONE" : "UNKNOWN") : \
-		(!(valid1_n) ? L(LBL_28V_IN_1) : L(LBL_28V_IN_2)))
+    /* Macro to dynamically resolve power source strings based on prioritizer.
+       - Returns Source 1 if valid1_n is active (prioritizer always selects 1).
+       - Returns Source 2 if valid1_n is inactive but valid2_n is active.
+       - Returns "NONE" if neither source is active. */
+    #define GET_SRC_STR(valid1_n, valid2_n) \
+        (!(valid1_n) ? L(LBL_28V_IN_1) : (!(valid2_n) ? L(LBL_28V_IN_2) : "NONE"))
 
 	/* ========================================================================= */
 	/* --- MAIN TASK LOOP (RUNS AT 1 HZ) --------------------------------------- */
@@ -261,15 +260,11 @@ void StartTask_Telemetry(void * argument) {
         // Internal 28V Bus Source
 		uint8_t int_src_id = GET_SRC_ID(muxData.fields.int1_valid_n, muxData.fields.int2_valid_n);
 
-        // Flag errors if a source is completely lost (0) or overlapping/shorted (3)
+		// Flag errors if a source is completely lost (0)
 		if (chr_src_id == 0) current_error_id |= ERR_CHR_NO_SRC;
-		else if (chr_src_id == 3) current_error_id |= ERR_CHR_UNKN_SRC;
-
 		if (as_src_id == 0) current_error_id |= ERR_AS_NO_SRC;
-		else if (as_src_id == 3) current_error_id |= ERR_AS_UNKN_SRC;
-
 		if (int_src_id == 0) current_error_id |= ERR_INT_NO_SRC;
-		else if (int_src_id == 3) current_error_id |= ERR_INT_UNKN_SRC;
+
 		/* --- 3. CALCULATE AND CONVERT RAW DATA TO ENGINEERING UNITS */
 
 		// --- Process INA260 I2C Sensors ---
@@ -421,11 +416,8 @@ void StartTask_Telemetry(void * argument) {
 
             // Append Source mapping faults
             if (current_error_id & ERR_CHR_NO_SRC)   strcat(err_str, "CHR_NO_SRC ");
-			if (current_error_id & ERR_CHR_UNKN_SRC) strcat(err_str, "CHR_UNKN_SRC ");
 			if (current_error_id & ERR_AS_NO_SRC)    strcat(err_str, "AS_NO_SRC ");
-			if (current_error_id & ERR_AS_UNKN_SRC)  strcat(err_str, "AS_UNKN_SRC ");
 			if (current_error_id & ERR_INT_NO_SRC)   strcat(err_str, "INT_NO_SRC ");
-			if (current_error_id & ERR_INT_UNKN_SRC) strcat(err_str, "INT_UNKN_SRC ");
 
 			// Reconstruct I2C failure strings dynamically based on bits set
 			for (int i = 0; i < NUM_INA260; i++) {

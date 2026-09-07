@@ -56,11 +56,8 @@ typedef enum {
 #define ERR_PCP_NC        (1UL << 13) /* Side is 0 (None) - Power Control Panel disconnected */
 #define ERR_SIDE_INV      (1UL << 14) /* Side is 3 (Invalid / Unknown / Both) - Hardware strapping fault in PCP side_sel*/
 #define ERR_CHR_NO_SRC    (1UL << 15) /* CHR has no valid power source (0) */
-#define ERR_CHR_UNKN_SRC  (1UL << 16) /* CHR has both power sources active simultaneously (3) */
-#define ERR_AS_NO_SRC     (1UL << 17) /* AS has no valid power source (0) */
-#define ERR_AS_UNKN_SRC   (1UL << 18) /* AS has both power sources active simultaneously (3) */
-#define ERR_INT_NO_SRC    (1UL << 19) /* 28V_INT has no valid power source (0) */
-#define ERR_INT_UNKN_SRC  (1UL << 20) /* 28V_INT has both power sources active simultaneously (3) */
+#define ERR_AS_NO_SRC     (1UL << 16) /* AS has no valid power source (0) */
+#define ERR_INT_NO_SRC    (1UL << 17) /* 28V_INT has no valid power source (0) */
 
 /* 4. Declare the string lookup table for external linkage */
 extern const char* const StringTable[NUM_VARIANTS][NUM_LABELS];

@@ -179,13 +179,19 @@ void StartTask_Telemetry(void * argument) {
     #define GET_SRC_STR(valid1_n, valid2_n) \
         (!(valid1_n) ? L(LBL_28V_IN_1) : (!(valid2_n) ? L(LBL_28V_IN_2) : "NONE"))
 
+    /* Variables to hold the timing metrics from the PREVIOUS cycle */
+	static uint32_t last_cpu_active_ms = 0;
+	static uint32_t last_total_loop_ms = 0;
+	static uint32_t last_tx_interval_ms = 0;
+	static uint32_t last_dma_tx_ms = 0;
+
+	/* Tracks the exact RTOS tick when the previous DMA UART transmission started */
+	static TickType_t previous_tx_start_tick = 0;
+
 	/* ========================================================================= */
 	/* --- MAIN TASK LOOP (RUNS AT 1 HZ) --------------------------------------- */
 	/* ========================================================================= */
     while(1) {
-    	/* Capture the exact tick-count when the telemetry task wakes up */
-    	TickType_t loop_start_tick = xTaskGetTickCount();
-
     	/* Reset the Error ID bitfield at the start of each evaluation second */
 		uint32_t current_error_id = 0; // Reset error bitfield
 
@@ -197,6 +203,11 @@ void StartTask_Telemetry(void * argument) {
 
 		/* Wait until exactly 1000ms have passed since the last execution */
 		vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+		/* --- START: CPU & Total Loop Timer ---
+		   Captured immediately after waking up. */
+		TickType_t loop_start_tick = xTaskGetTickCount();
+
 
 		/* Increment the continuous 1 Hz system uptime counter.
 		 * Placed immediately after vTaskDelayUntil() to guarantee that all task
@@ -623,8 +634,6 @@ void StartTask_Telemetry(void * argument) {
         /* ========================================================================= */
         /* --- APPEND FLATTENED DEBUG DATA (PURE JSON) ----------------------------- */
         /* ========================================================================= */
-        /* Calculate how many milliseconds this loop has executed so far */
-        uint32_t execution_time_ms = (xTaskGetTickCount() - loop_start_tick) * portTICK_PERIOD_MS;
 
         // RAM Usage: Query FreeRTOS dynamically for the remaining Heap memory
         uint32_t free_ram_bytes = (uint32_t)xPortGetFreeHeapSize();
@@ -640,9 +649,12 @@ void StartTask_Telemetry(void * argument) {
 				"\"tp2_v\":%.3f,\"tp5_v\":%.3f,\"prim_sel_v\":%.3f,\"sec_sel_v\":%.3f,\"tp9_v\":%.3f,\"tp10_v\":%.3f,"
 				"\"main1_v\":%.3f,\"main2_v\":%.3f,\"fp_s1_v\":%.3f,\"fp_s2_v\":%.3f,\"led_v\":%.3f,\"dir_v\":%.3f,\"omni_v\":%.3f,\"sec_v\":%.3f,"
 				"\"as_s1_v\":%.3f,\"as_s2_v\":%.3f,\"chr_s1_v\":%.3f,\"chr_s2_v\":%.3f,\"pcmu_s1_v\":%.3f,\"pcmu_s2_v\":%.3f,"
-				"\"Tel_Loop_Time_ms\":%lu,"
+        		"\"Tel_CPU_Active_ms\":%lu,"
+        		"\"Tel_Total_Task_ms\":%lu,"
+        		"\"Tel_Tx_Active_ms\":%lu,"
+        		"\"Tel_Tx_Interval_ms\":%lu,"
 				"\"Daq_Samples\":%lu,"
-				"\"Daq_Loop_Time_ms\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}"
+				"\"Daq_Task_Time_ms\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}"
 				"}",
 
 			// --- Message Length ---
@@ -680,9 +692,13 @@ void StartTask_Telemetry(void * argument) {
 			mux_voltages[0][5], mux_voltages[1][5], // chr
 			mux_voltages[0][6], mux_voltages[1][6], // pcmu
 
-			(unsigned long)execution_time_ms,	// Loop time of Telemetry task
-			(unsigned long)daq_samples,         // Number of DAQ samples this second
-			daq_min_ms, daq_max_ms, daq_avg_ms  // Loop time of DAQ task
+			(unsigned long)last_cpu_active_ms,   // Active CPU time of PREVIOUS cycle
+			(unsigned long)last_total_loop_ms,   // CPU + DMA time of PREVIOUS cycle
+			(unsigned long)last_dma_tx_ms,		 // DMA time of PREVIOUS cycle
+			(unsigned long)last_tx_interval_ms,  // Interval since PREVIOUS cycle (Should be ~1000)
+
+			(unsigned long)daq_samples,          // Number of DAQ samples this second
+			daq_min_ms, daq_max_ms, daq_avg_ms   // Loop time of DAQ task
 		);
 
         /* ========================================================================= */
@@ -701,13 +717,45 @@ void StartTask_Telemetry(void * argument) {
             "{\"PRI\":\"14\",\"VERSION\":\"1\",\"TIMESTAMP\":\"-\",\"HOSTNAME\":\"%s\",\"APP-NAME\":\"PCMU\",\"PROCID\":\"-\",\"MSGID\":\"HW_STATUS\",\"STRUCTURED-DATA\":\"-\",\"MSG\":{%s}}\r\n",
             L(LBL_PCMU), (txBuffer + 1));
 
-        /* Hand over the finalized string directly to the DMA peripheral for background transmission
-           on both the primary RS422 interface and the USB Virtual COM Port. */
-        HAL_UART_Transmit_DMA(&huart1, (uint8_t*)dmaTxBuffer, dma_len);
-        HAL_UART_Transmit_DMA(&huart2, (uint8_t*)dmaTxBuffer, dma_len);
+        /* ========================================================================= */
+		/* --- TIMING & DMA TRANSMISSION (RS422 & USB) ----------------------------- */
+		/* ========================================================================= */
+
+		/* --- MEASURE: TX Interval ---
+		   Measure time elapsed since the very last time we reached this exact line of code. */
+		TickType_t current_tx_start_tick = xTaskGetTickCount();
+		if (previous_tx_start_tick > 0) {
+			last_tx_interval_ms = (current_tx_start_tick - previous_tx_start_tick) * portTICK_PERIOD_MS;
+		}
+		previous_tx_start_tick = current_tx_start_tick;
+
+		/* --- STOP: CPU Active Timer ---
+		   CPU has finished reading hardware and building JSON. It will now rest/wait. */
+		last_cpu_active_ms = (xTaskGetTickCount() - loop_start_tick) * portTICK_PERIOD_MS;
+
+		/* --- START: DMA Timer ---
+		   Capture tick right before triggering the hardware transmission. */
+		TickType_t dma_start_tick = xTaskGetTickCount();
+
+		/* Hand over the finalized string directly to the DMA peripheral for background transmission */
+		HAL_UART_Transmit_DMA(&huart1, (uint8_t*)dmaTxBuffer, dma_len);
+		HAL_UART_Transmit_DMA(&huart2, (uint8_t*)dmaTxBuffer, dma_len);
+
+		/* Yield CPU time to the DAQ task while DMA handles the physical transmission.
+		   We poll the global state of the UART handlers to know when they are fully ready. */
+		while ((huart1.gState != HAL_UART_STATE_READY) || (huart2.gState != HAL_UART_STATE_READY)) {
+			vTaskDelay(pdMS_TO_TICKS(2));
+		}
+
+		/* --- STOP: DMA Timer ---
+		   UART DMA transmission is physically complete on the wires. */
+		last_dma_tx_ms = (xTaskGetTickCount() - dma_start_tick) * portTICK_PERIOD_MS;
+
+		/* --- STOP: Total Loop Timer ---
+		   UART DMA transmission is physically complete on the wires. */
+		last_total_loop_ms = (xTaskGetTickCount() - loop_start_tick) * portTICK_PERIOD_MS;
 
 		/* --- 6. RESET THE PROCESSED BUFFER FOR THE NEXT ROUND --- */
-		/* Wipe sum, count and re-initialize min/max thresholds for the clean buffer */
 		ResetBuffer(processIdx);
 
 		/* --- 7. FEED THE WATCHDOG --- */

@@ -14,7 +14,7 @@
 
 // Structure for a single measurement point over 1 second
 typedef struct {
-    uint32_t sum;
+    int32_t sum;
     int32_t min;
     int32_t max;
     uint32_t count;

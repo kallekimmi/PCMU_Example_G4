@@ -91,58 +91,54 @@ void StartTask_DAQ(void * argument) {
 			}
         }
 
-        /* --- 2. READ 3x SPI ADC (ADC128S022) --- */
-        for(int adc = 0; adc < NUM_SPI_ADC; adc++) {
+		/* --- 2. READ 3x SPI ADC (ADC128S022) --- */
+		for(int adc = 0; adc < NUM_SPI_ADC; adc++) {
 
-            // DUMMY READ: ADC128S022 requires one dummy frame to tell it to sample Channel 0 first
-            uint16_t txData = (0 << 11); // Command to select Channel 0 (Bits 13, 12, 11)
-            uint16_t rxData = 0;
+		    // --- DUMMY READ ---
+		    // Pre-load the ADC multiplexer with Channel 0 for the first iteration.
+		    uint16_t dummyTx = (0 << 11);
+		    uint16_t dummyRx = 0;
 
-            Set_SPI_CS(adc, 1);
-            // Dummy read - Timeout reduced to 2 ms
-            HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 2);
-            Set_SPI_CS(adc, 0);
+		    Set_SPI_CS(adc, 1);
+		    for(volatile int nop = 0; nop < 50; nop++); // Allow decoder time to pull CS low
 
-            // Minimum CS high time between conversions is ~50ns. A few NOPs cover this safely.
-			for(volatile int nop = 0; nop < 5; nop++) {
-				// Empty loop just for a tiny delay
-			}
+		    // Transmit 1 frame of 16 bits[cite: 1]
+		    HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&dummyTx, (uint8_t*)&dummyRx, 1, 2);
 
-            // Now read all 8 channels properly
-			for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
+		    Set_SPI_CS(adc, 0);
+		    for(volatile int nop = 0; nop < 50; nop++); // CS hold time
 
-				// We send the command for the NEXT channel to prep the ADC.
-				// If we are on the last channel, we just send 0.
-				uint8_t nextCh = (ch == 7) ? 0 : (ch + 1);
-				txData = (nextCh << 11);
+		    // --- READ ALL CHANNELS ---
+		    for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
 
-				Set_SPI_CS(adc, 1);
-				// Actual read - Timeout reduced to 2 ms
-				HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&txData, (uint8_t*)&rxData, 1, 2);
-				Set_SPI_CS(adc, 0);
-				for(volatile int nop = 0; nop < 5; nop++);
+		        // Pipeline mechanics: request the NEXT channel, receive the CURRENT channel.
+		        // Wrap around to 0 after reading channel 7.
+		        uint8_t nextCh = (ch == 7) ? 0 : (ch + 1);
 
-				// Only record the sample if the SPI transaction was successful
-				if (spi_status == HAL_OK) {
+		        // Place the 3-bit channel address in bits 13, 12, and 11 of the 16-bit word[cite: 1]
+		        uint16_t spiTx = (nextCh << 11);
+		        uint16_t spiRx = 0;
 
-					/* --- DEAD BUS CHECK ---
-					 * With an internal pull-up on MISO, a missing chip returns 0xFFFF.
-					 * A real ADC128S022 always sends 4 leading zeros, so it will never equal 0xFFFF.
-					 */
-					if (rxData != 0xFFFF) {
-						// Mask out the top 4 bits (ADC128S022 outputs 12-bit data)
-						uint16_t rawAdcValue = rxData & 0x0FFF;
+		        Set_SPI_CS(adc, 1);
+		        for(volatile int nop = 0; nop < 50; nop++);
 
-						pingPongBuf[idx].spi_adc[adc][ch].sum += rawAdcValue;
-						pingPongBuf[idx].spi_adc[adc][ch].count++;
-						if(rawAdcValue < pingPongBuf[idx].spi_adc[adc][ch].min) pingPongBuf[idx].spi_adc[adc][ch].min = rawAdcValue;
-						if(rawAdcValue > pingPongBuf[idx].spi_adc[adc][ch].max) pingPongBuf[idx].spi_adc[adc][ch].max = rawAdcValue;
-					}
-					/* If rxData == 0xFFFF, we skip the count++.
-					   The Telemetry task will see count == 0 and organically throw the SPI error! */
-				}
-			}
-        } /* <--- ADDED MISSING CLOSING BRACE HERE */
+		        HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&spiTx, (uint8_t*)&spiRx, 1, 2);
+
+		        Set_SPI_CS(adc, 0);
+		        for(volatile int nop = 0; nop < 50; nop++);
+
+		        if (spi_status == HAL_OK) {
+		            // DOUT clocks out 4 leading zeros followed by the 12-bit result[cite: 1].
+		            // Mask out the leading zeros to isolate the data.
+		            uint16_t rawAdcValue = spiRx & 0x0FFF;
+
+		            pingPongBuf[idx].spi_adc[adc][ch].sum += rawAdcValue;
+		            pingPongBuf[idx].spi_adc[adc][ch].count++;
+		            if(rawAdcValue < pingPongBuf[idx].spi_adc[adc][ch].min) pingPongBuf[idx].spi_adc[adc][ch].min = rawAdcValue;
+		            if(rawAdcValue > pingPongBuf[idx].spi_adc[adc][ch].max) pingPongBuf[idx].spi_adc[adc][ch].max = rawAdcValue;
+		        }
+		    }
+		}
 
         /* Calculate loop execution duration in microseconds */
 		uint32_t elapsed_cycles = DWT->CYCCNT - start_cycles;

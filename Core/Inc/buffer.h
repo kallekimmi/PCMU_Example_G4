@@ -7,9 +7,7 @@
 
 // Define sizes
 #define NUM_INA260 7
-#define NUM_SPI_ADC 3
-#define SPI_ADC_CHANNELS 8
-#define NUM_MUX 3
+#define NUM_MUX 4
 #define MUX_CHANNELS 8
 
 // Structure for a single measurement point over 1 second
@@ -22,9 +20,12 @@ typedef struct {
 
 // Our entire DAQ buffer
 typedef struct {
-    SensorStats_t ina_voltage[NUM_INA260];
-    SensorStats_t ina_current[NUM_INA260];
-    SensorStats_t spi_adc[NUM_SPI_ADC][SPI_ADC_CHANNELS];
+    SensorStats_t i2c1_ina_voltage[NUM_INA260];
+    SensorStats_t i2c1_ina_current[NUM_INA260];
+    SensorStats_t i2c3_ina_voltage[NUM_INA260];
+    SensorStats_t i2c3_ina_current[NUM_INA260];
+    uint16_t temperature;
+    uint16_t humidity;
     SensorStats_t daq_loop_time;
 } DaqBuffer_t;
 
@@ -75,6 +76,16 @@ typedef struct {
     uint8_t sec_side_sel_n; // Byte 21 (raw[2][5]) (mux3_tp8)
     uint8_t mux3_tp9;       // Byte 22 (raw[2][6])
     uint8_t mux3_tp10;      // Byte 23 (raw[2][7]) - Y7 tied to GND via resistor
+
+    /* --- MUX4 (COM3): Maps sequentially to raw[3][0] through raw[3][7] --- */
+    uint8_t adc_28v_in_1;   // Byte 24 (raw[3][0])
+    uint8_t adc_28v_in_2;   // Byte 25 (raw[3][1])
+    uint8_t adc_28v_int;    // Byte 26 (raw[3][2])
+    uint8_t adc_7v5;  		// Byte 27 (raw[3][3])
+    uint8_t adc_3v3;        // Byte 28 (raw[3][4])
+    uint8_t adc_mcu_5v;     // Byte 29 (raw[3][5])
+    uint8_t adc_mcu_3v3;    // Byte 30 (raw[3][6])
+    uint8_t mux3_tp1;       // Byte 31 (raw[3][7]) - Y7 tied to GND via resistor
 } MuxNamedFields_t;
 
 /* Define all explicit STM32 reset causes for telemetry */

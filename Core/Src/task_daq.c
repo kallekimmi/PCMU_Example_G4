@@ -6,35 +6,7 @@
 
 // Tell this file that the I2C and SPI handles exist in main.c
 extern I2C_HandleTypeDef hi2c1;
-extern SPI_HandleTypeDef hspi1;
-
-/* * Helper function to select the correct ADC via a 2-to-4 decoder.
- * Assumes A0 and A1 select ADC 0, 1 or 2, and setting both HIGH disables all.
- */
-static void Set_SPI_CS(uint8_t adc_idx, uint8_t enable) {
-    if (!enable) {
-        // Deselect all (Pulling both address lines HIGH typically disables the output)
-        HAL_GPIO_WritePin(SPI_CS_A1_GPIO_Port, SPI_CS_A1_Pin, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(SPI_CS_A0_GPIO_Port, SPI_CS_A0_Pin, GPIO_PIN_SET);
-        return;
-    }
-
-    // Select specific ADC
-    switch (adc_idx) {
-        case 0:
-            HAL_GPIO_WritePin(SPI_CS_A1_GPIO_Port, SPI_CS_A1_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(SPI_CS_A0_GPIO_Port, SPI_CS_A0_Pin, GPIO_PIN_RESET);
-            break;
-        case 1:
-            HAL_GPIO_WritePin(SPI_CS_A1_GPIO_Port, SPI_CS_A1_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(SPI_CS_A0_GPIO_Port, SPI_CS_A0_Pin, GPIO_PIN_SET);
-            break;
-        case 2:
-            HAL_GPIO_WritePin(SPI_CS_A1_GPIO_Port, SPI_CS_A1_Pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(SPI_CS_A0_GPIO_Port, SPI_CS_A0_Pin, GPIO_PIN_RESET);
-            break;
-    }
-}
+extern I2C_HandleTypeDef hi2c3;
 
 
 void StartTask_DAQ(void * argument) {
@@ -47,15 +19,27 @@ void StartTask_DAQ(void * argument) {
 	   Register 0x00 is the Configuration Register. */
 	uint8_t inaConfigPayload[3] = {0x00, 0x60, 0x07};
 
+
+	// Initialize devices on I2C1
 	for(int i = 0; i < NUM_INA260; i++) {
 		/* INA260 addresses are 7-bit, HAL requires them shifted by 1 bit left */
-		HAL_I2C_Master_Transmit(&hi2c1, (INA_I2C_ADDRS[i] << 1), inaConfigPayload, 3, 5);
+		HAL_I2C_Master_Transmit(&hi2c1, (INA_I2C1_ADDRS[i] << 1), inaConfigPayload, 3, 5);
 	}
+
+	// Initialize devices on I2C3
+	for(int i = 0; i < NUM_INA260; i++) {
+		/* INA260 addresses are 7-bit, HAL requires them shifted by 1 bit left */
+		HAL_I2C_Master_Transmit(&hi2c3, (INA_I2C3_ADDRS[i] << 1), inaConfigPayload, 3, 5);
+	}
+
 
 	/* Enable DWT Cycle Counter hardware register for microsecond task timing.
 	   Bit 0 of DWT->CTRL is the CYCCNT enable bit. */
 	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
 	DWT->CTRL |= 1UL;
+
+	TickType_t sht_trigger_tick = 0; //Temperature sensor timer (to know how long to wait)
+	uint8_t sht_state = 0; // 0 = Idle/Waiting for sync, 1 = Waiting for conversion
 
     /* --- MAIN TASK LOOP --- */
     while(1) {
@@ -68,76 +52,75 @@ void StartTask_DAQ(void * argument) {
         // Get the index of the active buffer
         uint8_t idx = activeBufIdx;
 
-        /* --- 1. READ INA260 OVER I2C --- */
+        /* --- 1. SHT41A Temperature sensor 1Hz STATE MACHINE --- */
+        if (sht_state == 0) {
+			// Trigger exactly when the telemetry task clears the flag
+			if (daq_is_alive == 0) {
+				uint8_t shtCmd = 0xFD; // High precision command
+				if (HAL_I2C_Master_Transmit(&hi2c3, (I2C3_ADR_TEMP << 1), &shtCmd, 1, 2) == HAL_OK) {
+					sht_state = 1;
+					sht_trigger_tick = start_tick; // Record the tick so we know when to read
+				}
+			}
+		}
+		else if (sht_state == 1) {
+			// High precision conversion takes up to 8.3 ms. Wait at least 20 ms.
+			if ((start_tick - sht_trigger_tick) >= pdMS_TO_TICKS(20)) {
+				uint8_t shtRx[6];
+				if (HAL_I2C_Master_Receive(&hi2c3, (I2C3_ADR_TEMP << 1), shtRx, 6, 2) == HAL_OK) {
+					pingPongBuf[idx].temperature_raw = (uint16_t)((shtRx[0] << 8) | shtRx[1]);
+					pingPongBuf[idx].humidity_raw = (uint16_t)((shtRx[3] << 8) | shtRx[4]);
+				}
+
+				// Return to idle state until the next time daq_is_alive becomes 0
+				sht_state = 0;
+			}
+		}
+
+        /* --- 1. READ I2C1 SENSORS --- */
 		for(int i = 0; i < NUM_INA260; i++) {
 			uint8_t i2cBuf[2];
 
 			// Read Voltage Register (0x02) - Timeout set to 2 ms
 			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawVoltage = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
-                pingPongBuf[idx].ina_voltage[i].sum += rawVoltage;
-                pingPongBuf[idx].ina_voltage[i].count++;
-                if(rawVoltage < pingPongBuf[idx].ina_voltage[i].min) pingPongBuf[idx].ina_voltage[i].min = rawVoltage;
-                if(rawVoltage > pingPongBuf[idx].ina_voltage[i].max) pingPongBuf[idx].ina_voltage[i].max = rawVoltage;
+                pingPongBuf[idx].i2c1_ina_voltage[i].sum += rawVoltage;
+                pingPongBuf[idx].i2c1_ina_voltage[i].count++;
+                if(rawVoltage < pingPongBuf[idx].i2c1_ina_voltage[i].min) pingPongBuf[idx].i2c1_ina_voltage[i].min = rawVoltage;
+                if(rawVoltage > pingPongBuf[idx].i2c1_ina_voltage[i].max) pingPongBuf[idx].i2c1_ina_voltage[i].max = rawVoltage;
 			}
 
 			// Read Current Register (0x01) - Timeout set to 2 ms
 			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawCurrent = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
-                pingPongBuf[idx].ina_current[i].sum += rawCurrent;
-                pingPongBuf[idx].ina_current[i].count++;
-                if(rawCurrent < pingPongBuf[idx].ina_current[i].min) pingPongBuf[idx].ina_current[i].min = rawCurrent;
-                if(rawCurrent > pingPongBuf[idx].ina_current[i].max) pingPongBuf[idx].ina_current[i].max = rawCurrent;
+                pingPongBuf[idx].i2c1_ina_current[i].sum += rawCurrent;
+                pingPongBuf[idx].i2c1_ina_current[i].count++;
+                if(rawCurrent < pingPongBuf[idx].i2c1_ina_current[i].min) pingPongBuf[idx].i2c1_ina_current[i].min = rawCurrent;
+                if(rawCurrent > pingPongBuf[idx].i2c1_ina_current[i].max) pingPongBuf[idx].i2c1_ina_current[i].max = rawCurrent;
 			}
         }
 
-		/* --- 2. READ 3x SPI ADC (ADC128S022) --- */
-		for(int adc = 0; adc < NUM_SPI_ADC; adc++) {
+		/* --- 2. READ I2C3 SENSORS --- */
+		for(int i = 0; i < NUM_INA260; i++) {
+			uint8_t i2cBuf[2];
 
-		    // --- DUMMY READ ---
-		    // Pre-load the ADC multiplexer with Channel 0 for the first iteration.
-		    uint16_t dummyTx = (0 << 11);
-		    uint16_t dummyRx = 0;
+			// Read Voltage Register
+			if (HAL_I2C_Mem_Read(&hi2c3, (INA_I2C3_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
+				int16_t rawVoltage = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
+				pingPongBuf[idx].i2c3_ina_voltage[i].sum += rawVoltage;
+				pingPongBuf[idx].i2c3_ina_voltage[i].count++;
+				if(rawVoltage < pingPongBuf[idx].i2c3_ina_voltage[i].min) pingPongBuf[idx].i2c3_ina_voltage[i].min = rawVoltage;
+				if(rawVoltage > pingPongBuf[idx].i2c3_ina_voltage[i].max) pingPongBuf[idx].i2c3_ina_voltage[i].max = rawVoltage;
+			}
 
-		    Set_SPI_CS(adc, 1);
-		    for(volatile int nop = 0; nop < 50; nop++); // Allow decoder time to pull CS low
-
-		    // Transmit 1 frame of 16 bits[cite: 1]
-		    HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&dummyTx, (uint8_t*)&dummyRx, 1, 2);
-
-		    Set_SPI_CS(adc, 0);
-		    for(volatile int nop = 0; nop < 50; nop++); // CS hold time
-
-		    // --- READ ALL CHANNELS ---
-		    for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
-
-		        // Pipeline mechanics: request the NEXT channel, receive the CURRENT channel.
-		        // Wrap around to 0 after reading channel 7.
-		        uint8_t nextCh = (ch == 7) ? 0 : (ch + 1);
-
-		        // Place the 3-bit channel address in bits 13, 12, and 11 of the 16-bit word[cite: 1]
-		        uint16_t spiTx = (nextCh << 11);
-		        uint16_t spiRx = 0;
-
-		        Set_SPI_CS(adc, 1);
-		        for(volatile int nop = 0; nop < 50; nop++);
-
-		        HAL_StatusTypeDef spi_status = HAL_SPI_TransmitReceive(&hspi1, (uint8_t*)&spiTx, (uint8_t*)&spiRx, 1, 2);
-
-		        Set_SPI_CS(adc, 0);
-		        for(volatile int nop = 0; nop < 50; nop++);
-
-		        if (spi_status == HAL_OK) {
-		            // DOUT clocks out 4 leading zeros followed by the 12-bit result[cite: 1].
-		            // Mask out the leading zeros to isolate the data.
-		            uint16_t rawAdcValue = spiRx & 0x0FFF;
-
-		            pingPongBuf[idx].spi_adc[adc][ch].sum += rawAdcValue;
-		            pingPongBuf[idx].spi_adc[adc][ch].count++;
-		            if(rawAdcValue < pingPongBuf[idx].spi_adc[adc][ch].min) pingPongBuf[idx].spi_adc[adc][ch].min = rawAdcValue;
-		            if(rawAdcValue > pingPongBuf[idx].spi_adc[adc][ch].max) pingPongBuf[idx].spi_adc[adc][ch].max = rawAdcValue;
-		        }
-		    }
+			// Read Current Register
+			if (HAL_I2C_Mem_Read(&hi2c3, (INA_I2C3_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
+				int16_t rawCurrent = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
+				pingPongBuf[idx].i2c3_ina_current[i].sum += rawCurrent;
+				pingPongBuf[idx].i2c3_ina_current[i].count++;
+				if(rawCurrent < pingPongBuf[idx].i2c3_ina_current[i].min) pingPongBuf[idx].i2c3_ina_current[i].min = rawCurrent;
+				if(rawCurrent > pingPongBuf[idx].i2c3_ina_current[i].max) pingPongBuf[idx].i2c3_ina_current[i].max = rawCurrent;
+			}
 		}
 
         /* Calculate loop execution duration in microseconds */

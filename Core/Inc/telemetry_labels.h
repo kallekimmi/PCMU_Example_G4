@@ -17,36 +17,7 @@ typedef enum {
     NUM_VARIANTS
 } Side_t;
 
-/* 2. Define unique IDs for all telemetry labels */
-typedef enum {
-	LBL_SIDE,
-	LBL_PCMU,
-    LBL_MS,
-    LBL_FW,
-    LBL_FP,
-    LBL_MD,
-    LBL_AUX1,
-    LBL_CHR,
-    LBL_AS,
-    LBL_MC,
-    LBL_FAN,
-    LBL_PSEC,
-    LBL_LPRC,
-    LBL_28V_IN_1,
-    LBL_28V_IN_2,
-    LBL_MAIN1,
-    LBL_MAIN2,
-    LBL_FP1,
-    LBL_FP2,
-	LBL_MC_LED,
-    LBL_V1,
-    LBL_I1,
-    LBL_V2,
-    LBL_I2,
-    NUM_LABELS
-} LabelID_t;
-
-/* 3. Define Telemetry ErrorID Bitfields */
+/* 2. Define Telemetry ErrorID Bitfields */
 /* These bits map directly to the ErrorID output in the telemetry JSON. */
 #define ERR_TEL_TASK_TO   (1UL << 0)  /* Telemetry task missed its 1 Hz deadline */
 #define ERR_INT_ADC_TO    (1UL << 1)  /* STM32 Internal ADC failed to respond */

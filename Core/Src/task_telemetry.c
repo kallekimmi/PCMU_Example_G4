@@ -247,7 +247,7 @@ void StartTask_Telemetry(void * argument) {
 			/* Start the conversion sequence (triggers Rank 1, 2, and 3 automatically) */
 			HAL_ADC_Start(&hadc2);
 
-			/* Read all 3 channels in sequence using the built-in sequencer */
+			/* Read all 4 channels in sequence using the built-in sequencer */
 			for(int m = 0; m < NUM_MUX; m++) {
 			    /* Ensure the conversion was successful before fetching the value */
 			    if (HAL_ADC_PollForConversion(&hadc2, 1) == HAL_OK) {

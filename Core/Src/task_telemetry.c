@@ -75,7 +75,7 @@ void StartTask_Telemetry(void * argument) {
 
 		HAL_ADC_Start(&hadc2);
 
-		// Read all 3 MUX chips (connected to ADC channels in a sequence)
+		// Read all 4 MUX chips (connected to ADC channels in a sequence)
 		for(int m = 0; m < NUM_MUX; m++) {
 			if (HAL_ADC_PollForConversion(&hadc2, 1) == HAL_OK) {
 				uint32_t raw_value = HAL_ADC_GetValue(&hadc2);
@@ -92,6 +92,7 @@ void StartTask_Telemetry(void * argument) {
 		muxData.raw[0][ch] = (startup_mux_voltages[0][ch] > 1.5f) ? 1 : 0;
 		muxData.raw[1][ch] = (startup_mux_voltages[1][ch] > 1.5f) ? 1 : 0;
 		muxData.raw[2][ch] = (startup_mux_voltages[2][ch] > 1.5f) ? 1 : 0;
+		//We skip MUX4 since it is only analog
 	}
 
 
@@ -270,6 +271,20 @@ void StartTask_Telemetry(void * argument) {
 			}
 		}
 
+		/* --- Scale MUX4 (Index 3) Raw Voltages to Engineering Units ---
+		 * Since the analog multiplexers are sampled only once per second in this task,
+		 * we do not have historical min/max/avg data for this 1 Hz cycle.
+		 * We scale the raw ADC voltages (0-3.3V) up to their actual rail voltages
+		 * using the resistor divider multipliers defined in daq.h.
+		 */
+		float v_28v_in_1 = mux_voltages[3][0] * V_DIV_28V_IN_1;
+		float v_28v_in_2 = mux_voltages[3][1] * V_DIV_28V_IN_2;
+		float v_28v_int  = mux_voltages[3][2] * V_DIV_28V_INT;
+		float v_7v5      = mux_voltages[3][3] * V_DIV_7V5;
+		float v_3v3      = mux_voltages[3][4] * V_DIV_3V3;
+		float v_mcu_5v   = mux_voltages[3][5] * V_DIV_MCU_5V;
+		float v_mcu_3v3  = mux_voltages[3][6] * V_DIV_MCU_3V3;
+
         // Chronometer Source
 		uint8_t chr_src_id = GET_SRC_ID(muxData.fields.chr1_valid_n, muxData.fields.chr2_valid_n);
 
@@ -286,137 +301,114 @@ void StartTask_Telemetry(void * argument) {
 
 		/* --- 3. CALCULATE AND CONVERT RAW DATA TO ENGINEERING UNITS */
 
-		// --- Process INA260 I2C Sensors ---
-		float ina_v_avg[NUM_INA260] = {0};
-		float ina_v_min[NUM_INA260] = {0};
-		float ina_v_max[NUM_INA260] = {0};
-		float ina_i_avg[NUM_INA260] = {0};
-		float ina_i_min[NUM_INA260] = {0};
-		float ina_i_max[NUM_INA260] = {0};
+		// --- Process INA260 I2C1 Sensors ---
+		float ina1_v_avg[NUM_INA260] = {0};
+		float ina1_v_min[NUM_INA260] = {0};
+		float ina1_v_max[NUM_INA260] = {0};
+		float ina1_i_avg[NUM_INA260] = {0};
+		float ina1_i_min[NUM_INA260] = {0};
+		float ina1_i_max[NUM_INA260] = {0};
 
 		for (int i = 0; i < NUM_INA260; i++) {
 			// Check if the sensor successfully responded during this second
-			if (pingPongBuf[processIdx].ina_voltage[i].count > 0) {
-				float v_avg_raw = (float)pingPongBuf[processIdx].ina_voltage[i].sum / pingPongBuf[processIdx].ina_voltage[i].count;
+			if (pingPongBuf[processIdx].i2c1_ina_voltage[i].count > 0) {
+				float v_avg_raw = (float)pingPongBuf[processIdx].i2c1_ina_voltage[i].sum / pingPongBuf[processIdx].i2c1_ina_voltage[i].count;
 
-				// Convert to Volts using macro from adc.h
-				ina_v_avg[i] = INA_RAW_TO_V(v_avg_raw);
-				ina_v_min[i] = INA_RAW_TO_V(pingPongBuf[processIdx].ina_voltage[i].min);
-				ina_v_max[i] = INA_RAW_TO_V(pingPongBuf[processIdx].ina_voltage[i].max);
+				// Convert to Volts using macro from daq.h
+				ina1_v_avg[i] = INA_RAW_TO_V(v_avg_raw);
+				ina1_v_min[i] = INA_RAW_TO_V(pingPongBuf[processIdx].i2c1_ina_voltage[i].min);
+				ina1_v_max[i] = INA_RAW_TO_V(pingPongBuf[processIdx].i2c1_ina_voltage[i].max);
 			}
 			else {
 				// Sensor timed out or failed to communicate
-				ina_v_avg[i] = -999.0f;
-				ina_v_min[i] = -999.0f;
-				ina_v_max[i] = -999.0f;
+				ina1_v_avg[i] = -999.0f;
+				ina1_v_min[i] = -999.0f;
+				ina1_v_max[i] = -999.0f;
 
-				/* Dynamically map the failed I2C index (0-6) into the reserved bit block */
-				current_error_id |= (1UL << (ERR_I2C_START_BIT + i));
+				/* Dynamically map the failed I2C1 index (0-6) into the reserved bit block */
+				current_error_id |= (1UL << (ERR_I2C1_START_BIT + i));
 			}
 
-			if (pingPongBuf[processIdx].ina_current[i].count > 0) {
-				float i_avg_raw = (float)pingPongBuf[processIdx].ina_current[i].sum / pingPongBuf[processIdx].ina_current[i].count;
+			if (pingPongBuf[processIdx].i2c1_ina_current[i].count > 0) {
+				float i_avg_raw = (float)pingPongBuf[processIdx].i2c1_ina_current[i].sum / pingPongBuf[processIdx].i2c1_ina_current[i].count;
 
-				// Convert to Amperes using macro from adc.h
-				ina_i_avg[i] = INA_RAW_TO_A(i_avg_raw);
-				ina_i_min[i] = INA_RAW_TO_A(pingPongBuf[processIdx].ina_current[i].min);
-				ina_i_max[i] = INA_RAW_TO_A(pingPongBuf[processIdx].ina_current[i].max);
+				// Convert to Amperes using macro from daq.h
+				ina1_i_avg[i] = INA_RAW_TO_A(i_avg_raw);
+				ina1_i_min[i] = INA_RAW_TO_A(pingPongBuf[processIdx].i2c1_ina_current[i].min);
+				ina1_i_max[i] = INA_RAW_TO_A(pingPongBuf[processIdx].i2c1_ina_current[i].max);
 			}
 			else {
-				ina_i_avg[i] = -999.0f;
-				ina_i_min[i] = -999.0f;
-				ina_i_max[i] = -999.0f;
+				ina1_i_avg[i] = -999.0f;
+				ina1_i_min[i] = -999.0f;
+				ina1_i_max[i] = -999.0f;
 			}
 		}
 
-		// --- Process SPI ADC Sensors ---
-		float adc_avg[NUM_SPI_ADC][SPI_ADC_CHANNELS] = {0};
-		float adc_min[NUM_SPI_ADC][SPI_ADC_CHANNELS] = {0};
-		float adc_max[NUM_SPI_ADC][SPI_ADC_CHANNELS] = {0};
 
-		for (int adc = 0; adc < NUM_SPI_ADC; adc++) {
-			for (int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
-				// Check if the DAQ task successfully captured data for this channel
-				if (pingPongBuf[processIdx].spi_adc[adc][ch].count > 0) {
-					float raw_avg = (float)pingPongBuf[processIdx].spi_adc[adc][ch].sum / pingPongBuf[processIdx].spi_adc[adc][ch].count;
-					float v_avg = ADC_RAW_TO_V(raw_avg);
-					float v_min = ADC_RAW_TO_V(pingPongBuf[processIdx].spi_adc[adc][ch].min);
-					float v_max = ADC_RAW_TO_V(pingPongBuf[processIdx].spi_adc[adc][ch].max);
+		// --- Process INA260 I2C3 Sensors ---
+		float ina3_v_avg[NUM_INA260] = {0};
+		float ina3_v_min[NUM_INA260] = {0};
+		float ina3_v_max[NUM_INA260] = {0};
+		float ina3_i_avg[NUM_INA260] = {0};
+		float ina3_i_min[NUM_INA260] = {0};
+		float ina3_i_max[NUM_INA260] = {0};
 
-					// Apply specific hardware voltage dividers or current sense formulas
-					if (adc == 0) { // ADC1: Voltage Sens
-						float div = 1.0f;
-						switch(ch) {
-							case 0: div = V_DIV_ADC1_CH0; break;
-							case 1: div = V_DIV_ADC1_CH1; break;
-							case 2: div = V_DIV_ADC1_CH2; break;
-							case 3: div = V_DIV_ADC1_CH3; break;
-							case 4: div = V_DIV_ADC1_CH4; break;
-							case 5: div = V_DIV_ADC1_CH5; break;
-							case 6: div = V_DIV_ADC1_CH6; break;
-							default: div = 1.0f; break;
-						}
-						adc_avg[adc][ch] = (v_avg * div);
-						adc_min[adc][ch] = (v_min * div);
-						adc_max[adc][ch] = (v_max * div);
-					}
-					else if (adc == 1) { // ADC2: Current Sens & Temp
-						if (ch == 7) {
-							adc_avg[adc][ch] = ADC_V_TO_CELSIUS(v_avg);
-							adc_min[adc][ch] = ADC_V_TO_CELSIUS(v_min);
-							adc_max[adc][ch] = ADC_V_TO_CELSIUS(v_max);
-						} else {
-							switch(ch) {
-								case 0:
-									adc_avg[adc][ch] = ADC_V_TO_A_MD(v_avg);
-									adc_min[adc][ch] = ADC_V_TO_A_MD(v_min);
-									adc_max[adc][ch] = ADC_V_TO_A_MD(v_max);
-									break;
-								case 1: case 2:
-									adc_avg[adc][ch] = ADC_V_TO_A_FP(v_avg);
-									adc_min[adc][ch] = ADC_V_TO_A_FP(v_min);
-									adc_max[adc][ch] = ADC_V_TO_A_FP(v_max);
-									break;
-								default:
-									adc_avg[adc][ch] = ADC_V_TO_A_FWSW(v_avg);
-									adc_min[adc][ch] = ADC_V_TO_A_FWSW(v_min);
-									adc_max[adc][ch] = ADC_V_TO_A_FWSW(v_max);
-									break;
-							}
-						}
-					}
-					else if (adc == 2) { // ADC3: Voltage Sens
-						float div = 1.0f;
-						switch(ch) {
-							case 0: div = V_DIV_ADC3_CH0; break;
-							case 1: div = V_DIV_ADC3_CH1; break;
-							case 2: div = V_DIV_ADC3_CH2; break;
-							case 3: div = V_DIV_ADC3_CH3; break;
-							case 4: div = V_DIV_ADC3_CH4; break;
-							case 5: div = V_DIV_ADC3_CH5; break;
-							case 6: div = V_DIV_ADC3_CH6; break;
-							case 7: div = V_DIV_ADC3_CH7; break;
-						}
-						adc_avg[adc][ch] = (v_avg * div);
-						adc_min[adc][ch] = (v_min * div);
-						adc_max[adc][ch] = (v_max * div);
-					}
-				}
-				else {
-					//Error handling for dropped SPI communications
-					adc_avg[adc][ch] = -999.0f;
-					adc_min[adc][ch] = -999.0f;
-					adc_max[adc][ch] = -999.0f;
+		for (int i = 0; i < NUM_INA260; i++) {
+			if (pingPongBuf[processIdx].i2c3_ina_voltage[i].count > 0) {
+				float v_avg_raw = (float)pingPongBuf[processIdx].i2c3_ina_voltage[i].sum / pingPongBuf[processIdx].i2c3_ina_voltage[i].count;
 
-					/* SPI Timeout! If channel 0 is missing data, we assume the entire
-					   chip failed. We only flag the error bit when ch == 0 to avoid overlaps. */
-					if (ch == 0) {
-						/* Dynamically map the failed ADC index (0-2) into the reserved bit block */
-						current_error_id |= (1UL << (ERR_SPI_START_BIT + adc));
-					}
-				}
+				ina3_v_avg[i] = INA_RAW_TO_V(v_avg_raw);
+				ina3_v_min[i] = INA_RAW_TO_V(pingPongBuf[processIdx].i2c3_ina_voltage[i].min);
+				ina3_v_max[i] = INA_RAW_TO_V(pingPongBuf[processIdx].i2c3_ina_voltage[i].max);
+			}
+			else {
+				ina3_v_avg[i] = -999.0f;
+				ina3_v_min[i] = -999.0f;
+				ina3_v_max[i] = -999.0f;
+
+				/* Dynamically map the failed I2C3 index (0-6) into the reserved bit block */
+				current_error_id |= (1UL << (ERR_I2C3_START_BIT + i));
+			}
+
+			if (pingPongBuf[processIdx].i2c3_ina_current[i].count > 0) {
+				float i_avg_raw = (float)pingPongBuf[processIdx].i2c3_ina_current[i].sum / pingPongBuf[processIdx].i2c3_ina_current[i].count;
+
+				ina3_i_avg[i] = INA_RAW_TO_A(i_avg_raw);
+				ina3_i_min[i] = INA_RAW_TO_A(pingPongBuf[processIdx].i2c3_ina_current[i].min);
+				ina3_i_max[i] = INA_RAW_TO_A(pingPongBuf[processIdx].i2c3_ina_current[i].max);
+			}
+			else {
+				ina3_i_avg[i] = -999.0f;
+				ina3_i_min[i] = -999.0f;
+				ina3_i_max[i] = -999.0f;
 			}
 		}
+
+		// --- Calculate SHT41A Temperature and Humidity (I2C3) ---
+		float temp_c = -999.0f;
+		float hum_rh = -999.0f;
+
+		if (pingPongBuf[processIdx].temperature_raw > 0) {
+			temp_c = SHT_RAW_TO_TEMP_C(pingPongBuf[processIdx].temperature_raw);
+		} else {
+			// Set error-flag if temp-sensorn did not respond
+			current_error_id |= (1UL << ERR_I2C3_SHT_BIT);
+		}
+
+		if (pingPongBuf[processIdx].humidity_raw > 0) {
+			hum_rh = SHT_RAW_TO_HUMID_PERC(pingPongBuf[processIdx].humidity_raw);
+
+			/*
+			 * Cropping (0.0% - 100.0% RH):
+			 * Per the Sensirion SHT4xA datasheet (Section 4.5), the conversion formula
+			 * can output non-physical values (< 0% or > 100%) near the measurement
+			 * boundaries due to natural sensor noise. The manufacturer explicitly advises
+			 * cropping the result to the standard 0-100% range for normal applications.
+			 */
+			if (hum_rh > 100.0f) hum_rh = 100.0f;
+			if (hum_rh < 0.0f) hum_rh = 0.0f;
+		}
+
 
 		/* --- 4. ERROR LOGIC & RECONSTRUCTION --- */
 
@@ -426,34 +418,41 @@ void StartTask_Telemetry(void * argument) {
 		if (current_error_id == 0) {
 			strcpy(err_str, "NONE"); // Clean system
 		} else {
-            // Append single-bit system faults
+			// Append single-bit system faults
 			if (current_error_id & ERR_TEL_TASK_TO)  strcat(err_str, "TEL_TASK_TO ");
 			if (current_error_id & ERR_DAQ_TASK_TO)  strcat(err_str, "DAQ_TASK_TO ");
 			if (current_error_id & ERR_INT_ADC_TO)   strcat(err_str, "INT_ADC_TO ");
 			if (current_error_id & ERR_PCP_NC)       strcat(err_str, "PCP_NC ");
 			if (current_error_id & ERR_SIDE_INV)     strcat(err_str, "SIDE_INV ");
 
-            // Append Source mapping faults
-            if (current_error_id & ERR_CHR_NO_SRC)   strcat(err_str, "CHR_NO_SRC ");
+			// Append Source mapping faults
+			if (current_error_id & ERR_CHR_NO_SRC)   strcat(err_str, "CHR_NO_SRC ");
 			if (current_error_id & ERR_AS_NO_SRC)    strcat(err_str, "AS_NO_SRC ");
 			if (current_error_id & ERR_INT_NO_SRC)   strcat(err_str, "INT_NO_SRC ");
 
-			// Reconstruct I2C failure strings dynamically based on bits set
+			// Reconstruct I2C1 failure strings (INA260)
 			for (int i = 0; i < NUM_INA260; i++) {
-				if (current_error_id & (1UL << (ERR_I2C_START_BIT + i))) {
-					char to_str[16];
-					snprintf(to_str, sizeof(to_str), "I2C_0x%02X_TO ", INA_I2C_ADDRS[i]);
+				if (current_error_id & (1UL << (ERR_I2C1_START_BIT + i))) {
+					char to_str[24];
+					snprintf(to_str, sizeof(to_str), "I2C1_0x%02X_TO ", INA_I2C1_ADDRS[i]);
 					strcat(err_str, to_str);
 				}
 			}
 
-			// Reconstruct SPI failure strings dynamically based on bits set
-			for (int adc = 0; adc < NUM_SPI_ADC; adc++) {
-				if (current_error_id & (1UL << (ERR_SPI_START_BIT + adc))) {
-					char to_str[16];
-					snprintf(to_str, sizeof(to_str), "SPI_ADC%d_TO ", adc + 1); // Creates SPI_ADC1_TO etc.
+			// Reconstruct I2C3 failure strings (INA260)
+			for (int i = 0; i < NUM_INA260; i++) {
+				if (current_error_id & (1UL << (ERR_I2C3_START_BIT + i))) {
+					char to_str[24];
+					snprintf(to_str, sizeof(to_str), "I2C3_0x%02X_TO ", INA_I2C3_ADDRS[i]);
 					strcat(err_str, to_str);
 				}
+			}
+
+			// Reconstruct I2C3 failure string (SHT41A)
+			if (current_error_id & (1UL << ERR_I2C3_SHT_BIT)) {
+				char to_str[24];
+				snprintf(to_str, sizeof(to_str), "I2C3_0x%02X_TO ", I2C3_ADR_TEMP);
+				strcat(err_str, to_str);
 			}
 
 			// Remove the trailing space applied during concatation for a clean output
@@ -478,6 +477,7 @@ void StartTask_Telemetry(void * argument) {
 			daq_min_ms = (float)pingPongBuf[processIdx].daq_loop_time.min / 1000.0f;
 			daq_max_ms = (float)pingPongBuf[processIdx].daq_loop_time.max / 1000.0f;
 		}
+
 
 		/* ========================================================================= */
 		/* --- RUNTIME HYBRID LOGGER (FLASH + RAM) --------------------------------- */
@@ -514,17 +514,17 @@ void StartTask_Telemetry(void * argument) {
 
 			// --- MS ---
 			L(LBL_MS),
-			L(LBL_V1), adc_min[0][6], adc_max[0][6], adc_avg[0][6],
-			L(LBL_I1), adc_min[1][6], adc_max[1][6], adc_avg[1][6],
-			L(LBL_V2), adc_min[0][5], adc_max[0][5], adc_avg[0][5],
-			L(LBL_I2), adc_min[1][5], adc_max[1][5], adc_avg[1][5],
+			L(LBL_V1), ina3_v_min[3], ina3_v_max[3], ina3_v_avg[3],
+			L(LBL_I1), ina3_i_min[3], ina3_i_max[3], ina3_i_avg[3],
+			L(LBL_V2), ina3_v_min[4], ina3_v_max[4], ina3_v_avg[4],
+			L(LBL_I2), ina3_i_min[4], ina3_i_max[4], ina3_i_avg[4],
 
 			// --- FW ---
 			L(LBL_FW),
-			L(LBL_V1), adc_min[0][4], adc_max[0][4], adc_avg[0][4],
-			L(LBL_I1), adc_min[1][4], adc_max[1][4], adc_avg[1][4],
-			L(LBL_V2), adc_min[0][3], adc_max[0][3], adc_avg[0][3],
-			L(LBL_I2), adc_min[1][3], adc_max[1][3], adc_avg[1][3]
+			L(LBL_V1), ina3_v_min[5], ina3_v_max[5], ina3_v_avg[5],
+			L(LBL_I1), ina3_i_min[5], ina3_i_max[5], ina3_i_avg[5],
+			L(LBL_V2), ina3_v_min[6], ina3_v_max[6], ina3_v_avg[6],
+			L(LBL_I2), ina3_i_min[6], ina3_i_max[6], ina3_i_avg[6]
 		);
 
 		/* 5b. Format JSON: FP, MD, AUX1, CHR */
@@ -536,25 +536,25 @@ void StartTask_Telemetry(void * argument) {
 
 			// --- FP ---
 			L(LBL_FP),
-			L(LBL_V1), adc_min[0][2], adc_max[0][2], adc_avg[0][2],
-			L(LBL_I1), adc_min[1][2], adc_max[1][2], adc_avg[1][2],
-			L(LBL_V2), adc_min[0][1], adc_max[0][1], adc_avg[0][1],
-			L(LBL_I2), adc_min[1][1], adc_max[1][1], adc_avg[1][1],
+			L(LBL_V1), ina3_v_min[0], ina3_v_max[0], ina3_v_avg[0],
+			L(LBL_I1), ina3_i_min[0], ina3_i_max[0], ina3_i_avg[0],
+			L(LBL_V2), ina3_v_min[1], ina3_v_max[1], ina3_v_avg[1],
+			L(LBL_I2), ina3_i_min[1], ina3_i_max[1], ina3_i_avg[1],
 
 			// --- MD ---
 			L(LBL_MD),
-			adc_min[0][0], adc_max[0][0], adc_avg[0][0], // V
-			adc_min[1][0], adc_max[1][0], adc_avg[1][0], // I
+			ina3_v_min[2], ina3_v_max[2], ina3_v_avg[2],    // V
+			ina3_i_min[2], ina3_i_max[2], ina3_i_avg[2],    // I
 
 			// --- AUX1 ---
 			L(LBL_AUX1),
-			ina_v_min[2], ina_v_max[2], ina_v_avg[2],    // V
-			ina_i_min[2], ina_i_max[2], ina_i_avg[2],    // I
+			ina1_v_min[2], ina1_v_max[2], ina1_v_avg[2],    // V
+			ina1_i_min[2], ina1_i_max[2], ina1_i_avg[2],    // I
 
 			// --- CHR (Dynamically maps to AUX2 on Secondary) ---
 			L(LBL_CHR),
-			ina_v_min[6], ina_v_max[6], ina_v_avg[6],    // V
-			ina_i_min[6], ina_i_max[6], ina_i_avg[6],    // I
+			ina1_v_min[6], ina1_v_max[6], ina1_v_avg[6],    // V
+			ina1_i_min[6], ina1_i_max[6], ina1_i_avg[6],    // I
 			chr_src_id, // Chronometer source as integer 0 = None,1, 2, 3=UNKNOWN
 			GET_SRC_STR(muxData.fields.chr1_valid_n, muxData.fields.chr2_valid_n)
 		);
@@ -569,58 +569,66 @@ void StartTask_Telemetry(void * argument) {
 
 			// --- AS (Dynamically maps to AUX3 on Secondary) ---
 			L(LBL_AS),
-			ina_v_min[4], ina_v_max[4], ina_v_avg[4],
-			ina_i_min[4], ina_i_max[4], ina_i_avg[4],
+			ina1_v_min[4], ina1_v_max[4], ina1_v_avg[4],
+			ina1_i_min[4], ina1_i_max[4], ina1_i_avg[4],
 			as_src_id, // Authentication Server source as integer 0 = None,1, 2, 3=UNKNOWN
 			GET_SRC_STR(muxData.fields.as1_valid_n, muxData.fields.as2_valid_n),
 
 			// --- MC ---
-			L(LBL_MC), ina_v_min[0], ina_v_max[0], ina_v_avg[0], ina_i_min[0], ina_i_max[0], ina_i_avg[0],
+			L(LBL_MC), ina1_v_min[0], ina1_v_max[0], ina1_v_avg[0], ina1_i_min[0], ina1_i_max[0], ina1_i_avg[0],
 
 			// --- FAN ---
-			L(LBL_FAN), ina_v_min[1], ina_v_max[1], ina_v_avg[1], ina_i_min[1], ina_i_max[1], ina_i_avg[1],
+			L(LBL_FAN), ina1_v_min[1], ina1_v_max[1], ina1_v_avg[1], ina1_i_min[1], ina1_i_max[1], ina1_i_avg[1],
 
 			// --- PSEC ---
-			L(LBL_PSEC), ina_v_min[5], ina_v_max[5], ina_v_avg[5], ina_i_min[5], ina_i_max[5], ina_i_avg[5],
+			L(LBL_PSEC), ina1_v_min[5], ina1_v_max[5], ina1_v_avg[5], ina1_i_min[5], ina1_i_max[5], ina1_i_avg[5],
 
 			// --- LPRC ---
-			L(LBL_LPRC), ina_v_min[3], ina_v_max[3], ina_v_avg[3], ina_i_min[3], ina_i_max[3], ina_i_avg[3]
+			L(LBL_LPRC), ina1_v_min[3], ina1_v_max[3], ina1_v_avg[3], ina1_i_min[3], ina1_i_max[3], ina1_i_avg[3]
 		);
 
 		/* 5d. Format JSON: Internal Power Architecture */
 		len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
-			"\"%s\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"%s\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"28V_INT\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f},\"SrcID\":%d,\"Src\":\"%s\"},"
-			"\"7V5\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"5V\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"3V3\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},",
+			"\"%s\":{\"V\":%.3f},"
+			"\"%s\":{\"V\":%.3f},"
+			"\"28V_INT\":{\"V\":%.3f,\"SrcID\":%d,\"Src\":\"%s\"},"
+			"\"7V5\":{\"V\":%.3f},"
+			"\"3V3\":{\"V\":%.3f},",
 
-			// --- 28V Inputs (Dynamically swaps UPS1/UPS2 on secondary side) ---
-			L(LBL_28V_IN_1), adc_min[2][0], adc_max[2][0], adc_avg[2][0],
-			L(LBL_28V_IN_2), adc_min[2][1], adc_max[2][1], adc_avg[2][1],
+			/* 28V Primary Inputs
+			 * Labels dynamically swap between UPS1/UPS2 depending on board side strapping */
+			L(LBL_28V_IN_1), v_28v_in_1,
+			L(LBL_28V_IN_2), v_28v_in_2,
 
-			// --- Static internal/low voltages ---
-			adc_min[2][2], adc_max[2][2], adc_avg[2][2], // 28V INT
-			int_src_id, // Internal PCMU HW voltage source as integer 0 = None,1, 2, 3=UNKNOWN
+			/* Internal 28V Rail and its active hardware source tracker */
+			v_28v_int,
+			int_src_id, // 0 = None, 1 = Source 1, 2 = Source 2, 3 = Source 1 (Both valid)
 			GET_SRC_STR(muxData.fields.int1_valid_n, muxData.fields.int2_valid_n),
-			adc_min[2][3], adc_max[2][3], adc_avg[2][3], // 7.5V
-			adc_min[2][4], adc_max[2][4], adc_avg[2][4], // 5V
-			adc_min[2][5], adc_max[2][5], adc_avg[2][5]  // 3.3V
+
+			/* Static internal low-voltage rails */
+			v_7v5,
+			v_3v3
 		);
 
-		/* 5e. Format JSON: Remaining internal rails and PCP */
+		/* 5e. Format JSON: MCU power rails, Environmental data, and PCP state */
 		len += snprintf(txBuffer + len, sizeof(txBuffer) - len,
-			"\"5V_MCU\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"3V3_MCU\":{\"V\":{\"Min\":%.3f,\"Max\":%.3f,\"Avg\":%.3f}},"
-			"\"Temp\":{\"T\":{\"Min\":%.1f,\"Max\":%.1f,\"Avg\":%.1f}},"
+			"\"5V_MCU\":{\"V\":%.3f},"
+			"\"3V3_MCU\":{\"V\":%.3f},"
+			"\"Temp\":%.1f,"
+			"\"Humidity\":%.1f,"
 			"\"PCP\":{\"%s\":%d,\"%s\":%d,\"%s\":%d,\"%s\":%d,\"%s\":%d,\"DIR\":%d,\"OMNI\":%d,\"SEC\":%d}",
 
-			adc_min[2][6], adc_max[2][6], adc_avg[2][6], // 5V_MCU
-			adc_min[2][7], adc_max[2][7], adc_avg[2][7], // 3.3V_MCU
-			adc_min[1][7], adc_max[1][7], adc_avg[1][7], // Temp
+			/* MCU supply voltages (Sampled via MUX4) */
+			v_mcu_5v,
+			v_mcu_3v3,
 
-			// --- PCP Digital States using mapped keys ---
+			/* Environmental Data (Sampled via SHT41A over I2C3) */
+			temp_c,
+			hum_rh,
+
+			/* Power Control Panel (PCP) Digital Switch States
+			 * Keys are dynamically fetched from the StringTable to reflect the correct
+			 * hardware orientation (Primary vs Secondary). Values are binary (1 = On, 0 = Off). */
 			L(LBL_MAIN1),  muxData.fields.di_main1_state,
 			L(LBL_MAIN2),  muxData.fields.di_main2_state,
 			L(LBL_FP1),    muxData.fields.di_fp1_state,

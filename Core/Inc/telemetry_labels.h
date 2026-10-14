@@ -17,18 +17,51 @@ typedef enum {
     NUM_VARIANTS
 } Side_t;
 
-/* 2. Define Telemetry ErrorID Bitfields */
+/* 2. Define unique IDs for all telemetry labels */
+typedef enum {
+	LBL_SIDE,
+	LBL_PCMU,
+    LBL_MS,
+    LBL_FW,
+    LBL_FP,
+    LBL_MD,
+    LBL_AUX1,
+    LBL_CHR,
+    LBL_AS,
+    LBL_MC,
+    LBL_FAN,
+    LBL_PSEC,
+    LBL_LPRC,
+    LBL_28V_IN_1,
+    LBL_28V_IN_2,
+    LBL_MAIN1,
+    LBL_MAIN2,
+    LBL_FP1,
+    LBL_FP2,
+	LBL_MC_LED,
+    LBL_V1,
+    LBL_I1,
+    LBL_V2,
+    LBL_I2,
+    NUM_LABELS
+} LabelID_t;
+
+/* 3. Define Telemetry ErrorID Bitfields */
 /* These bits map directly to the ErrorID output in the telemetry JSON. */
 #define ERR_TEL_TASK_TO   (1UL << 0)  /* Telemetry task missed its 1 Hz deadline */
 #define ERR_INT_ADC_TO    (1UL << 1)  /* STM32 Internal ADC failed to respond */
-#define ERR_I2C_START_BIT 2           /* Bits 2-8 used dynamically for the 7 INA260 I2C sensors */
-#define ERR_SPI_START_BIT 9           /* Bits 9-11 used dynamically for the 3 SPI ADC chips */
-#define ERR_DAQ_TASK_TO   (1UL << 12) /* High-priority DAQ task failed to report alive */
-#define ERR_PCP_NC        (1UL << 13) /* Side is 0 (None) - Power Control Panel disconnected */
-#define ERR_SIDE_INV      (1UL << 14) /* Side is 3 (Invalid / Unknown / Both) - Hardware strapping fault in PCP side_sel*/
-#define ERR_CHR_NO_SRC    (1UL << 15) /* CHR has no valid power source (0) */
-#define ERR_AS_NO_SRC     (1UL << 16) /* AS has no valid power source (0) */
-#define ERR_INT_NO_SRC    (1UL << 17) /* 28V_INT has no valid power source (0) */
+#define ERR_I2C1_START_BIT 2          /* Bits 2-8 used dynamically for the 7 INA260 I2C3 sensors */
+#define ERR_I2C3_START_BIT 9          /* Bits 9-15 used dynamically for the 7 INA260 I2C3 sensors */
+#define ERR_I2C3_SHT_BIT  16		  /* SHT41A temp-sensor on I2C3 */
+#define ERR_DAQ_TASK_TO   (1UL << 17) /* High-priority DAQ task failed to report alive */
+#define ERR_PCP_NC        (1UL << 18) /* Side is 0 (None) - Power Control Panel disconnected */
+#define ERR_SIDE_INV      (1UL << 19) /* Side is 3 (Invalid / Unknown / Both) - Hardware strapping fault in PCP side_sel*/
+#define ERR_CHR_NO_SRC    (1UL << 20) /* CHR has no valid power source (0) */
+#define ERR_CHR_UNKN_SRC  (1UL << 21) /* CHR has both power sources active simultaneously (3) */
+#define ERR_AS_NO_SRC     (1UL << 22) /* AS has no valid power source (0) */
+#define ERR_AS_UNKN_SRC   (1UL << 23) /* AS has both power sources active simultaneously (3) */
+#define ERR_INT_NO_SRC    (1UL << 24) /* 28V_INT has no valid power source (0) */
+#define ERR_INT_UNKN_SRC  (1UL << 25) /* 28V_INT has both power sources active simultaneously (3) */
 
 /* 4. Declare the string lookup table for external linkage */
 extern const char* const StringTable[NUM_VARIANTS][NUM_LABELS];

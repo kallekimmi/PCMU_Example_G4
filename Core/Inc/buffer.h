@@ -24,15 +24,15 @@ typedef struct {
     SensorStats_t i2c1_ina_current[NUM_INA260];
     SensorStats_t i2c3_ina_voltage[NUM_INA260];
     SensorStats_t i2c3_ina_current[NUM_INA260];
-    uint16_t temperature;
-    uint16_t humidity;
+    uint16_t temperature_raw;
+    uint16_t humidity_raw;
     SensorStats_t daq_loop_time;
 } DaqBuffer_t;
 
 /* * ============================================================================
  * MULTIPLEXER DATA MAPPING (TYPE PUNNING)
  * ============================================================================
- * In C, a 2D array like raw[3][8] is physically stored as 24 continuous
+ * In C, a 2D array like raw[4][8] is physically stored as 32 continuous
  * bytes in memory, not as a grid.
  * * By defining a struct with exactly 24 consecutive uint8_t variables, and
  * putting both the struct and the array inside the same 'union', we force
@@ -44,8 +44,8 @@ typedef struct {
  * are literally the same byte in RAM.
  * ============================================================================
  */
-// Structure with explicit names mapped exactly to the schematic (U8, U10, U11)
-// Total memory footprint: 24 bytes (3 MUXes * 8 channels)
+// Structure with explicit names mapped exactly to the schematic
+// Total memory footprint: 32 bytes (4 MUXes * 8 channels)
 typedef struct {
     /* --- MUX1 (COM0): Maps sequentially to raw[0][0] through raw[0][7] --- */
     uint8_t di_main1_state; // Byte 0  (raw[0][0])
@@ -119,7 +119,8 @@ extern DaqBuffer_t pingPongBuf[2];
 extern volatile uint8_t activeBufIdx;
 
 // Address array for INA260 from your header (Declaration ONLY)
-extern const uint8_t INA_I2C_ADDRS[NUM_INA260];
+extern const uint8_t INA_I2C1_ADDRS[NUM_INA260];
+extern const uint8_t INA_I2C3_ADDRS[NUM_INA260];
 
 // Watchdog safety flag
 extern volatile uint8_t daq_is_alive;

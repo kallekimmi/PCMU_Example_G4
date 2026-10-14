@@ -11,6 +11,11 @@
 #define V_DIV_MCU_5V          ((27.0f + 27.0f) / 27.0f)  // 5V
 #define V_DIV_MCU_3V3         ((10.0f + 33.0f) / 33.0f)  // 3V3
 
+/* --- SHT41A Parameters --- */
+// Formulas from SHT4xA datasheet section 4.5
+#define SHT_RAW_TO_TEMP_C(raw)     (-45.0f + 175.0f * ((float)(raw) / 65535.0f))
+#define SHT_RAW_TO_HUMID_PERC(raw) (-6.0f + 125.0f * ((float)(raw) / 65535.0f))
+
 /* --- INA260 Parameters --- */
 #define INA_CURRENT_LSB    				1.25f 	// mA per bit
 #define INA_VOLTAGE_LSB    				1.25f 	// mV per bit

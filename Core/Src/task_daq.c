@@ -82,7 +82,7 @@ void StartTask_DAQ(void * argument) {
 			uint8_t i2cBuf[2];
 
 			// Read Voltage Register (0x02) - Timeout set to 2 ms
-			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
+			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C1_ADDRS[i] << 1), INA_REG_VOLTAGE, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawVoltage = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].i2c1_ina_voltage[i].sum += rawVoltage;
                 pingPongBuf[idx].i2c1_ina_voltage[i].count++;
@@ -91,7 +91,7 @@ void StartTask_DAQ(void * argument) {
 			}
 
 			// Read Current Register (0x01) - Timeout set to 2 ms
-			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
+			if (HAL_I2C_Mem_Read(&hi2c1, (INA_I2C1_ADDRS[i] << 1), INA_REG_CURRENT, I2C_MEMADD_SIZE_8BIT, i2cBuf, 2, 2) == HAL_OK) {
 				int16_t rawCurrent = (int16_t)((i2cBuf[0] << 8) | i2cBuf[1]);
                 pingPongBuf[idx].i2c1_ina_current[i].sum += rawCurrent;
                 pingPongBuf[idx].i2c1_ina_current[i].count++;

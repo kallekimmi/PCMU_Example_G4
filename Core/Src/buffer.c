@@ -8,39 +8,43 @@ DaqBuffer_t pingPongBuf[2];
 volatile uint8_t activeBufIdx = 0;
 MuxData_t muxData;
 const uint8_t INA_I2C1_ADDRS[NUM_INA260] = {
-    INA_I2C1_ADR_MC, INA_I2C1_ADR_FAN, INA_I2C1_ADR_CUST,
-    INA_I2C1_ADR_LPRC, INA_I2C1_ADR_AUTH, INA_I2C1_ADR_INT, INA_I2C1_ADR_CHR
+	I2C1_ADR_INA_MC, I2C1_ADR_INA_FAN, I2C1_ADR_INA_CUST,
+	I2C1_ADR_INA_LPRC, I2C1_ADR_INA_AUTH, I2C1_ADR_INA_INT, I2C1_ADR_INA_CHR
 };
 const uint8_t INA_I2C3_ADDRS[NUM_INA260] = {
 		I2C3_ADR_INA_FP1, I2C3_ADR_INA_FP2, I2C3_ADR_INA_MD,
 		I2C3_ADR_INA_MS1, I2C3_ADR_INA_MS2, I2C3_ADR_INA_FW1, I2C3_ADR_INA_FW2
 };
 
-
 // ResetBuffer function implementation
 void ResetBuffer(uint8_t bufIdx) {
     // Reset INA260
     for(int i = 0; i < NUM_INA260; i++) {
-        pingPongBuf[bufIdx].ina_voltage[i].sum = 0;
-        pingPongBuf[bufIdx].ina_voltage[i].count = 0;
-        pingPongBuf[bufIdx].ina_voltage[i].min = INT32_MAX;
-        pingPongBuf[bufIdx].ina_voltage[i].max = INT32_MIN;
+        pingPongBuf[bufIdx].i2c1_ina_voltage[i].sum = 0;
+        pingPongBuf[bufIdx].i2c1_ina_voltage[i].count = 0;
+        pingPongBuf[bufIdx].i2c1_ina_voltage[i].min = INT32_MAX;
+        pingPongBuf[bufIdx].i2c1_ina_voltage[i].max = INT32_MIN;
 
-        pingPongBuf[bufIdx].ina_current[i].sum = 0;
-        pingPongBuf[bufIdx].ina_current[i].count = 0;
-        pingPongBuf[bufIdx].ina_current[i].min = INT32_MAX;
-        pingPongBuf[bufIdx].ina_current[i].max = INT32_MIN;
+        pingPongBuf[bufIdx].i2c1_ina_current[i].sum = 0;
+        pingPongBuf[bufIdx].i2c1_ina_current[i].count = 0;
+        pingPongBuf[bufIdx].i2c1_ina_current[i].min = INT32_MAX;
+        pingPongBuf[bufIdx].i2c1_ina_current[i].max = INT32_MIN;
+
+        pingPongBuf[bufIdx].i2c3_ina_voltage[i].sum = 0;
+        pingPongBuf[bufIdx].i2c3_ina_voltage[i].count = 0;
+        pingPongBuf[bufIdx].i2c3_ina_voltage[i].min = INT32_MAX;
+        pingPongBuf[bufIdx].i2c3_ina_voltage[i].max = INT32_MIN;
+
+        pingPongBuf[bufIdx].i2c3_ina_current[i].sum = 0;
+        pingPongBuf[bufIdx].i2c3_ina_current[i].count = 0;
+        pingPongBuf[bufIdx].i2c3_ina_current[i].min = INT32_MAX;
+        pingPongBuf[bufIdx].i2c3_ina_current[i].max = INT32_MIN;
     }
 
-    // Reset SPI ADCs
-    for(int adc = 0; adc < NUM_SPI_ADC; adc++) {
-        for(int ch = 0; ch < SPI_ADC_CHANNELS; ch++) {
-            pingPongBuf[bufIdx].spi_adc[adc][ch].sum = 0;
-            pingPongBuf[bufIdx].spi_adc[adc][ch].count = 0;
-            pingPongBuf[bufIdx].spi_adc[adc][ch].min = INT32_MAX;
-            pingPongBuf[bufIdx].spi_adc[adc][ch].max = INT32_MIN;
-        }
-    }
+    //Reset Temperature and Humidity
+    pingPongBuf[bufIdx].temperature_raw = 0;
+	pingPongBuf[bufIdx].humidity_raw = 0;
+
     // Reset DAQ loop timing stats
 	pingPongBuf[bufIdx].daq_loop_time.sum = 0;
 	pingPongBuf[bufIdx].daq_loop_time.count = 0;
